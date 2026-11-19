@@ -156,16 +156,24 @@
   }
 
   /**
-   * Main Accounting Engine: process compact Sheet1 rows into structured accounting data
+   * Main Accounting Engine: process compact Sheet1 rows using Sheet2 branch/machine schema
    * Compact row format: [machineId, rawCurrent, rawRemaining, rawDateTime, branch]
+   * Options:
+   *  - sheet2Schema: { order: [...], counts: { branch: 1|2 }, totalMachines }
+   *  - scopeMode: 'sheet2' (default, strictly follows Sheet2 branches & machine counts) | 'all' (includes extra Sheet1 branches, still capped at max 2 machines/branch)
    */
   function processRows(compactRows, options = {}) {
-    const maxPerDay = options.maxShotsPerMachinePerDay || 250000;
+    const maxPerDay = options.maxShotsPerMachinePerDay || 200000;
+    const maxGapDays = options.maxGapDaysForDelta || 7;
     const maxLifespan = options.maxHeadLifespan || 10000000;
+    const globalMaxMachines = Math.min(2, options.maxMachinesPerBranch || 2);
     const headSwapNewThreshold = 250000; // Counter <= 250k on swap day = brand new head from 0
+    const sheet2Schema = options.sheet2Schema || { order: [], counts: {}, totalMachines: 0 };
+    const scopeMode = options.scopeMode || 'sheet2';
+    const hasSheet2Schema = sheet2Schema.order && sheet2Schema.order.length > 0;
 
     const audits = [];
-    const byBranchDate = new Map(); // branch -> Map(dateKey -> { dateInfo, rawRecords: [] })
+    const byBranchDate = new Map(); // branch -> Map(dateKey -> { dateInfo, candidates: [] })
     const allMonthsSet = new Set();
     const allDatesSet = new Set();
 
@@ -182,6 +190,8 @@
       const branch = cleanBranchName(row[4]);
 
       if (!branch || branch === '#N/A' || !rawDateTime) continue;
+      if (scopeMode === 'sheet2' && hasSheet2Schema && !sheet2Schema.counts[branch]) continue;
+
       const dateInfo = parseDateTime(rawDateTime);
       if (!dateInfo) continue;
 
@@ -230,28 +240,48 @@
     const dailyEvents = []; // Every calculated machine-day usage record (Actual mode)
     const branchMeta = {};  // branch -> { tracks, machineCount, latestDate, headSwaps }
 
-    const sortedBranches = Array.from(byBranchDate.keys()).sort((a, b) => a.localeCompare(b, 'th'));
+    // Order branches following Sheet2 order first, then any additional branches alphabetically
+    const existingBranches = Array.from(byBranchDate.keys());
+    const sortedBranches = [];
+    if (hasSheet2Schema) {
+      for (const b of sheet2Schema.order) {
+        if (byBranchDate.has(b)) sortedBranches.push(b);
+      }
+    }
+    for (const b of existingBranches.sort((a, b) => a.localeCompare(b, 'th'))) {
+      if (!sortedBranches.includes(b)) sortedBranches.push(b);
+    }
 
-    // 2. Per-branch chronological multi-machine tracking with lookahead verification
+    // 2. Per-branch chronological tracking — STRICTLY capped to exact Sheet2 machine count (1 or 2, NEVER > 2!)
     for (const branch of sortedBranches) {
       const dateMap = byBranchDate.get(branch);
       const sortedDateKeys = Array.from(dateMap.keys()).sort();
-      const tracks = []; // { id, label, machineIdCounts, lastDateInfo, lastVal, totalShots, headSwaps, readingsCount }
+
+      // Determine hard machine limit for this branch:
+      // In 'sheet2' mode -> strictly uses Sheet2's exact count (1 or 2)
+      // In 'all' mode    -> uses max(Sheet2 count, 2) but NEVER exceeds 2
+      const sheet2Count = sheet2Schema.counts[branch] || 0;
+      const maxTracksForBranch = (scopeMode === 'sheet2' && sheet2Count > 0)
+        ? Math.min(globalMaxMachines, sheet2Count)
+        : globalMaxMachines;
+
+      const tracks = []; // Max length === maxTracksForBranch (1 or 2!)
       let nextTrackNum = 1;
 
       function isReasonableDelta(prevVal, nextVal, dayGap) {
+        if (dayGap <= 0 || dayGap > maxGapDays) return false;
         const delta = nextVal - prevVal;
         if (delta < 0) return false;
-        const cap = Math.min(2000000, Math.max(maxPerDay, dayGap * maxPerDay));
+        const cap = Math.min(750000, Math.max(maxPerDay, dayGap * maxPerDay));
         return delta <= cap;
       }
 
       function trackContinuesInFuture(track, fromIdx) {
-        const maxLookIdx = Math.min(sortedDateKeys.length - 1, fromIdx + 5);
+        const maxLookIdx = Math.min(sortedDateKeys.length - 1, fromIdx + 4);
         for (let j = fromIdx + 1; j <= maxLookIdx; j++) {
           const fut = dateMap.get(sortedDateKeys[j]);
           const gap = daysBetween(track.lastDateInfo.utcMs, fut.dateInfo.utcMs);
-          if (gap > 14) break;
+          if (gap > maxGapDays) break;
           for (const c of fut.candidates) {
             if (isReasonableDelta(track.lastVal, c.val, gap)) return true;
           }
@@ -260,14 +290,13 @@
       }
 
       function candidateConfirmedInFuture(cand, fromIdx, activeTracks) {
-        const maxLookIdx = Math.min(sortedDateKeys.length - 1, fromIdx + 5);
+        const maxLookIdx = Math.min(sortedDateKeys.length - 1, fromIdx + 4);
         for (let j = fromIdx + 1; j <= maxLookIdx; j++) {
           const fut = dateMap.get(sortedDateKeys[j]);
           const gap = daysBetween(cand.dateInfo.utcMs, fut.dateInfo.utcMs);
-          if (gap <= 0 || gap > 14) continue;
+          if (gap <= 0 || gap > maxGapDays) continue;
           for (const fc of fut.candidates) {
             if (isReasonableDelta(cand.val, fc.val, gap)) {
-              // Ensure future reading isn't simply a much better continuation of an existing track far from cand
               let explainedByOtherTrack = false;
               for (const t of activeTracks) {
                 if (Math.abs(t.lastVal - cand.val) > 300000) {
@@ -288,7 +317,6 @@
       function registerMachineId(track, rawId) {
         if (!rawId || rawId === 'ไม่ระบุ') return;
         track.machineIdCounts[rawId] = (track.machineIdCounts[rawId] || 0) + 1;
-        // Pick most frequent clean ID as display label
         let bestId = '';
         let bestCount = 0;
         for (const [k, cnt] of Object.entries(track.machineIdCounts)) {
@@ -308,17 +336,14 @@
         const dayBucket = dateMap.get(dk);
         const dateInfo = dayBucket.dateInfo;
 
-        // Deduplicate same-day readings that are within 40,000 shots of each other (re-submissions)
+        // Deduplicate same-day readings within 40,000 shots (duplicate submissions)
         const rawCands = dayBucket.candidates.slice().sort((a, b) => a.seq - b.seq);
         const clusters = [];
         for (const c of rawCands) {
           let merged = false;
           for (const cl of clusters) {
             if (Math.abs(cl.rep.val - c.val) <= 40000) {
-              // Keep the latest submission (or higher counter if same minute)
-              if (c.val >= cl.rep.val) {
-                cl.rep = c;
-              }
+              if (c.val >= cl.rep.val) cl.rep = c;
               cl.count++;
               merged = true;
               break;
@@ -326,20 +351,21 @@
           }
           if (!merged) clusters.push({ rep: c, count: 1 });
         }
-        const candidates = clusters.map(cl => cl.rep);
+        // Sort candidates ascending so for 1-machine Sheet2 branches (like ชลบุรี/ระยอง matching Sheet2's SORT index 1),
+        // the primary counter aligns cleanly with Sheet2!
+        const candidates = clusters.map(cl => cl.rep).sort((a, b) => a.val - b.val);
 
-        // Step A: Build all valid (track, candidate) continuation pairs
+        // Step A: Match candidates to existing active tracks (within maxGapDays & reasonable delta)
         const pairs = [];
         for (let tIdx = 0; tIdx < tracks.length; tIdx++) {
           const track = tracks[tIdx];
           const dayGap = daysBetween(track.lastDateInfo.utcMs, dateInfo.utcMs);
-          if (dayGap <= 0) continue;
+          if (dayGap <= 0 || dayGap > maxGapDays) continue;
           for (let cIdx = 0; cIdx < candidates.length; cIdx++) {
             const cand = candidates[cIdx];
             if (isReasonableDelta(track.lastVal, cand.val, dayGap)) {
               const delta = cand.val - track.lastVal;
               const perDay = delta / dayGap;
-              // Prefer matching machine tag and realistic daily shot count (~50k)
               let tagBonus = 0;
               if (track.canonicalTag && cand.machineTag) {
                 tagBonus = track.canonicalTag === cand.machineTag ? -100000 : 80000;
@@ -350,7 +376,6 @@
           }
         }
 
-        // Greedy best 1-to-1 assignment (sorted by score asc)
         pairs.sort((a, b) => a.score - b.score);
         const matchedTracks = new Set();
         const matchedCands = new Set();
@@ -414,49 +439,92 @@
           }
         }
 
-        // Step B: Handle unmatched candidates (Head Swap vs New Machine vs OCR Outlier)
+        // Step B: Handle unmatched candidates — strictly bounded to maxTracksForBranch (1 or 2)
         const unmatchedCands = candidates.filter((_, idx) => !matchedCands.has(idx));
 
         for (const cand of unmatchedCands) {
           const confirmed = candidateConfirmedInFuture(cand, dIdx, tracks);
           const isLastFewDays = dIdx >= sortedDateKeys.length - 2;
 
-          // Bootstrap first track(s) or confirmed new/swapped stream
+          // If we already matched ALL allowed machines for this branch today, any extra reading is either
+          // a duplicate/secondary unconfigured counter or an OCR outlier — never create a 3rd track!
+          if (matchedTracks.size >= maxTracksForBranch) {
+            if (!confirmed) {
+              audits.push({
+                severity: 'error',
+                type: 'OCR_OUTLIER',
+                typeLabel: 'ค่ากระโดด/OCR พลาด',
+                dateKey: dk,
+                monthKey: dateInfo.monthKey,
+                thaiDate: dateInfo.thaiDate,
+                branch,
+                machineId: cand.machineRaw,
+                rawCurrent: cand.rawCurrent,
+                prevVal: tracks[0] ? tracks[0].lastVal : null,
+                curVal: cand.val,
+                shotsUsed: null,
+                message: `พบค่าซ้ำ/ผิดปกติในวันที่เครื่องครบ ${maxTracksForBranch} เครื่องแล้ว (${cand.val.toLocaleString()}) — ตัดออกอัตโนมัติ`
+              });
+            }
+            continue;
+          }
+
           if (confirmed || (tracks.length === 0 && !isLastFewDays)) {
-            // Check if any unmatched existing track has stopped continuing in the future -> Head Swap!
-            let swapTarget = null;
+            // Check if any unmatched existing track should be replaced (Head Swap or Long-Gap Re-baseline)
+            let replaceTarget = null;
             for (let tIdx = 0; tIdx < tracks.length; tIdx++) {
               if (matchedTracks.has(tIdx)) continue;
               const t = tracks[tIdx];
-              if (!trackContinuesInFuture(t, dIdx)) {
-                // Prefer matching machine tag if available
-                if (!swapTarget) {
-                  swapTarget = { tIdx, track: t };
+              const gapSinceLast = daysBetween(t.lastDateInfo.utcMs, dateInfo.utcMs);
+              const stopped = gapSinceLast > maxGapDays || !trackContinuesInFuture(t, dIdx);
+              if (stopped) {
+                if (!replaceTarget) {
+                  replaceTarget = { tIdx, track: t, gapSinceLast };
                 } else if (t.canonicalTag && cand.machineTag && t.canonicalTag === cand.machineTag) {
-                  swapTarget = { tIdx, track: t };
+                  replaceTarget = { tIdx, track: t, gapSinceLast };
+                } else if (gapSinceLast > replaceTarget.gapSinceLast) {
+                  replaceTarget = { tIdx, track: t, gapSinceLast };
                 }
               }
             }
 
-            if (swapTarget) {
-              const track = swapTarget.track;
-              matchedTracks.add(swapTarget.tIdx);
+            // If branch already reached maxTracksForBranch (1 or 2), MUST reuse an unmatched track if available
+            if (!replaceTarget && tracks.length >= maxTracksForBranch) {
+              for (let tIdx = 0; tIdx < tracks.length; tIdx++) {
+                if (!matchedTracks.has(tIdx)) {
+                  const gapSinceLast = daysBetween(tracks[tIdx].lastDateInfo.utcMs, dateInfo.utcMs);
+                  if (!replaceTarget || gapSinceLast > replaceTarget.gapSinceLast) {
+                    replaceTarget = { tIdx, track: tracks[tIdx], gapSinceLast };
+                  }
+                }
+              }
+            }
+
+            if (replaceTarget) {
+              const track = replaceTarget.track;
+              matchedTracks.add(replaceTarget.tIdx);
               const prevDateInfo = track.lastDateInfo;
               const prevVal = track.lastVal;
-              const dayGap = daysBetween(prevDateInfo.utcMs, dateInfo.utcMs);
-              const isBrandNewHead = cand.val <= headSwapNewThreshold;
+              const dayGap = Math.max(1, replaceTarget.gapSinceLast);
+
+              // Distinguish: Long gap (> maxGapDays) on SAME head vs Head Replacement!
+              const isLongGapSameHead = dayGap > maxGapDays && cand.val >= prevVal && (cand.val - prevVal) <= dayGap * maxPerDay;
+              const isBrandNewHead = !isLongGapSameHead && cand.val <= headSwapNewThreshold;
               const swapShots = isBrandNewHead ? cand.val : 0;
+              const status = isLongGapSameHead ? 'GAP_RESET' : (isBrandNewHead ? 'HEAD_SWAP_NEW' : 'HEAD_SWAP_USED');
 
               track.lastDateInfo = dateInfo;
               track.lastVal = cand.val;
               track.readingsCount++;
-              track.headSwaps.push({
-                dateKey: dk,
-                thaiDate: dateInfo.thaiDate,
-                fromVal: prevVal,
-                toVal: cand.val,
-                isBrandNewHead
-              });
+              if (!isLongGapSameHead) {
+                track.headSwaps.push({
+                  dateKey: dk,
+                  thaiDate: dateInfo.thaiDate,
+                  fromVal: prevVal,
+                  toVal: cand.val,
+                  isBrandNewHead
+                });
+              }
               track.totalShots += swapShots;
               registerMachineId(track, cand.machineRaw);
 
@@ -479,14 +547,16 @@
                 curVal: cand.val,
                 rawCurrent: cand.rawCurrent,
                 shotsUsed: swapShots,
-                dayGap: Math.max(1, dayGap),
-                status: isBrandNewHead ? 'HEAD_SWAP_NEW' : 'HEAD_SWAP_USED'
+                dayGap,
+                status
               });
 
               audits.push({
                 severity: 'warning',
-                type: isBrandNewHead ? 'HEAD_SWAP_NEW' : 'HEAD_SWAP_USED',
-                typeLabel: isBrandNewHead ? 'เปลี่ยนหัวใหม่' : 'สลับ/ย้ายหัวสำรอง',
+                type: status,
+                typeLabel: isLongGapSameHead
+                  ? `ขาดส่งเกิน ${maxGapDays} วัน (รีเซ็ตฐาน)`
+                  : (isBrandNewHead ? 'เปลี่ยนหัวใหม่' : 'สลับ/ย้ายหัวสำรอง'),
                 dateKey: dk,
                 monthKey: dateInfo.monthKey,
                 thaiDate: dateInfo.thaiDate,
@@ -496,12 +566,14 @@
                 prevVal,
                 curVal: cand.val,
                 shotsUsed: swapShots,
-                message: isBrandNewHead
-                  ? `เปลี่ยนหัว Applicator ใหม่ (${prevVal.toLocaleString()} → ${cand.val.toLocaleString()}) นับยอดหัวใหม่ ${swapShots.toLocaleString()} ช็อต`
-                  : `สลับหัวที่มีช็อตสะสมอยู่แล้ว (${prevVal.toLocaleString()} → ${cand.val.toLocaleString()}) ตั้งยอดวันสลับเป็น 0 เพื่อไม่ให้ยอดบวม (แนะนำให้บัญชีตรวจสอบ)`
+                message: isLongGapSameHead
+                  ? `ขาดส่งต่อเนื่อง ${dayGap} วัน (จาก ${prevDateInfo.thaiDate}: ${prevVal.toLocaleString()} → ${cand.val.toLocaleString()}, ผลต่างรวม ${(cand.val - prevVal).toLocaleString()} ช็อต) ตั้งฐานใหม่เพื่อไม่ให้ยอดกระโดดในวันเดียว`
+                  : (isBrandNewHead
+                    ? `เปลี่ยนหัว Applicator ใหม่ (${prevVal.toLocaleString()} → ${cand.val.toLocaleString()}) นับยอดหัวใหม่ ${swapShots.toLocaleString()} ช็อต`
+                    : `สลับหัวที่มีช็อตสะสมอยู่แล้ว (${prevVal.toLocaleString()} → ${cand.val.toLocaleString()}) ตั้งยอดวันสลับเป็น 0 เพื่อไม่ให้ยอดบวม`)
               });
-            } else {
-              // Create new machine track (bootstrap on day 1 or branch added a 2nd machine)
+            } else if (tracks.length < maxTracksForBranch) {
+              // Create new machine track ONLY if below maxTracksForBranch (1 or 2)
               const num = nextTrackNum++;
               const newTrack = {
                 id: `${branch}#M${num}`,
@@ -520,7 +592,6 @@
               tracks.push(newTrack);
               matchedTracks.add(tracks.length - 1);
 
-              // Baseline reading (no previous day to subtract)
               dailyEvents.push({
                 dateKey: dk,
                 monthKey: dateInfo.monthKey,
@@ -571,7 +642,7 @@
         }
       }
 
-      // Finalize machine labels on events (in case canonical ID was discovered on later days)
+      // Finalize machine labels on events
       const trackLabelMap = {};
       for (const t of tracks) {
         trackLabelMap[t.id] = t.canonicalId || `เครื่อง ${t.num}`;
@@ -585,6 +656,7 @@
       branchMeta[branch] = {
         branch,
         machineCount: tracks.length,
+        sheet2MachineCount: sheet2Count || tracks.length,
         tracks: tracks.map(t => ({
           id: t.id,
           num: t.num,
@@ -618,6 +690,8 @@
 
     return {
       totalRawRows,
+      scopeMode,
+      sheet2Schema,
       branches: sortedBranches,
       branchMeta,
       months,

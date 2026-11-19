@@ -23,7 +23,7 @@
         <div class="brand-icon" aria-hidden="true">📊</div>
         <div>
           <h1 class="brand-title">สรุปการใช้ช็อตรายวันแยกตามสาขา (สำหรับฝ่ายบัญชี)</h1>
-          <p class="brand-subtitle">Applicator Shot Usage Dashboard — ดึงข้อมูลอัตโนมัติจาก Google Sheets</p>
+          <p class="brand-subtitle">Applicator Shot Usage Dashboard — อ้างอิงโครงสร้างสาขา/เครื่อง (ไม่เกิน 2 เครื่อง) จาก Sheet2 • ดึงสดอัตโนมัติ</p>
         </div>
       </div>
 
@@ -61,6 +61,14 @@
 
     <!-- Filter & Accounting Controls -->
     <section class="control-bar" aria-label="ตัวกรองข้อมูลบัญชี">
+      <div class="control-group">
+        <label for="scopeSelect">อ้างอิงโครงสร้างสาขา/เครื่อง</label>
+        <select id="scopeSelect">
+          <option value="sheet2">อิงตาม Sheet2 เป็นหลัก (1–2 เครื่อง)</option>
+          <option value="all">รวมสาขาอื่นใน Sheet1 (สูงสุด 2 เครื่อง)</option>
+        </select>
+      </div>
+
       <div class="control-group">
         <label for="monthSelect">เดือนบัญชี</label>
         <select id="monthSelect"></select>

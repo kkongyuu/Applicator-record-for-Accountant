@@ -15,6 +15,7 @@
     settings: window.loadSavedSettings(),
     rawMeta: null,
     processed: null,
+    scopeMode: 'sheet2',    // 'sheet2' (primary, follows Sheet2 branches & 1-2 machine counts) | 'all'
     selectedMonth: '',      // 'YYYY-MM' or 'ALL'
     selectedBranch: 'ALL',  // 'ALL' or branch name
     gapMode: 'actual',      // 'actual' | 'prorate'
@@ -86,6 +87,23 @@
     label.textContent = text;
   }
 
+  function reprocessData() {
+    if (!state.rawMeta) return;
+    state.processed = window.ShotEngine.processRows(state.rawMeta.rows, {
+      sheet2Schema: state.rawMeta.sheet2Schema,
+      scopeMode: state.scopeMode,
+      maxMachinesPerBranch: state.settings.maxMachinesPerBranch || 2,
+      maxShotsPerMachinePerDay: state.settings.maxShotsPerMachinePerDay,
+      maxGapDaysForDelta: state.settings.maxGapDaysForDelta || 7,
+      maxHeadLifespan: state.settings.maxHeadLifespan
+    });
+    const schema = state.rawMeta.sheet2Schema;
+    const scopeSelect = document.getElementById('scopeSelect');
+    if (scopeSelect && schema && schema.order && schema.order.length > 0) {
+      scopeSelect.options[0].textContent = `อิงตาม Sheet2 (${schema.order.length} สาขา / ${schema.totalMachines} เครื่อง)`;
+    }
+  }
+
   // ---------- Data Loading ----------
   async function loadData(isManual = false) {
     setSyncUI('loading', isManual ? 'กำลังอัปเดตจาก Google Sheet...' : 'กำลังเชื่อมต่อ Google Sheet...');
@@ -93,10 +111,7 @@
     try {
       const result = await window.SheetFetcher.fetchSheetData(state.settings);
       state.rawMeta = result;
-      state.processed = window.ShotEngine.processRows(result.rows, {
-        maxShotsPerMachinePerDay: state.settings.maxShotsPerMachinePerDay,
-        maxHeadLifespan: state.settings.maxHeadLifespan
-      });
+      reprocessData();
 
       const banner = document.getElementById('snapshotBanner');
       if (result.source === 'snapshot') {
@@ -873,6 +888,7 @@
         MULTI_DAY: `<span class="badge badge-amber">สะสม ${ev.dayGap} วัน</span>`,
         HEAD_SWAP_NEW: '<span class="badge badge-blue">เปลี่ยนหัวใหม่</span>',
         HEAD_SWAP_USED: '<span class="badge badge-amber">สลับหัวสำรอง</span>',
+        GAP_RESET: `<span class="badge badge-amber">ขาดส่ง ${ev.dayGap} วัน (ตั้งฐานใหม่)</span>`,
         BASELINE: '<span class="badge badge-slate">ค่าตั้งต้น</span>'
       };
       const badge = ev.isProrated
@@ -1034,6 +1050,13 @@
 
   // ---------- Event Wiring ----------
   function bindEvents() {
+    document.getElementById('scopeSelect').addEventListener('change', e => {
+      state.scopeMode = e.target.value;
+      reprocessData();
+      populateFilters();
+      renderAll();
+    });
+
     document.getElementById('monthSelect').addEventListener('change', e => {
       state.selectedMonth = e.target.value;
       renderAll();

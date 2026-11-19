@@ -6,8 +6,9 @@ window.DASHBOARD_CONFIG = {
   // Google Spreadsheet ID จาก URL ของผู้ใช้
   spreadsheetId: '1aZHfyPyzrKocAXUKCyhRm1COJRVE894ii9y2d3rA2HA',
 
-  // ชื่อแท็บข้อมูลดิบ (Sheet1 มีข้อมูลครบทั้ง 19 สาขา พร้อมวันเวลาและหมายเลขเครื่อง)
+  // ชื่อแท็บข้อมูลดิบ (Sheet1) และแท็บโครงสร้างสาขา/จำนวนเครื่องหลัก (Sheet2)
   sheetName: 'Sheet1',
+  schemaSheetName: 'Sheet2',
   sheetGid: '0',
 
   // (ทางเลือก) URL ของ Google Apps Script Web App กรณีต้องการเก็บ Google Sheet เป็น Private
@@ -17,8 +18,14 @@ window.DASHBOARD_CONFIG = {
   // ระยะเวลาดึงข้อมูลอัตโนมัติ (มิลลิวินาที) — ค่าเริ่มต้นทุก 5 นาที (300,000 ms)
   autoRefreshMs: 5 * 60 * 1000,
 
+  // จำนวนเครื่องสูงสุดต่อสาขา (อิงตามความเป็นจริงและ Sheet2 = ไม่เกิน 2 เครื่องต่อสาขา)
+  maxMachinesPerBranch: 2,
+
   // เกณฑ์ช็อตสูงสุดต่อเครื่องต่อวัน (สำหรับตรวจจับค่า OCR ผิดปกติ)
-  maxShotsPerMachinePerDay: 250000,
+  maxShotsPerMachinePerDay: 200000,
+
+  // ช่วงห่างวันสูงสุดที่ยอมให้นำมาลบหาผลต่างสะสม (หากขาดส่งเกิน 7 วันจะตั้งเป็นค่าเริ่มต้นใหม่แทนการบวกกระโดด)
+  maxGapDaysForDelta: 7,
 
   // อายุการใช้งานสูงสุดต่อหัว Applicator (10 ล้านช็อต)
   maxHeadLifespan: 10000000,

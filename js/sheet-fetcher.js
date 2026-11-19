@@ -285,6 +285,90 @@
   }
 
   /**
+   * Build structured branch->machineCount map from Sheet2 column header array
+   * (e.g. ["ยะลา", "รัตนาธิเบศร์", "รัตนาธิเบศร์", ...]) capped at max 2 machines/branch
+   */
+  function buildSheet2Schema(columnsArr) {
+    const order = [];
+    const counts = {};
+    if (!Array.isArray(columnsArr)) return { order, counts, totalMachines: 0 };
+    for (const raw of columnsArr) {
+      const name = String(raw ?? '').trim();
+      if (!name || /^\d+$/.test(name)) continue;
+      if (!counts[name]) {
+        order.push(name);
+        counts[name] = 1;
+      } else if (counts[name] < 2) {
+        counts[name] += 1;
+      }
+    }
+    const totalMachines = order.reduce((s, b) => s + (counts[b] || 1), 0);
+    return { order, counts, totalMachines };
+  }
+
+  /**
+   * Fetch Sheet2 Row 1 live via GViz JSONP to get the authoritative branch list & machine counts (1 or 2)
+   */
+  function fetchSheet2SchemaJsonp(spreadsheetId, schemaSheetName = 'Sheet2', timeoutMs = 10000) {
+    return new Promise((resolve, reject) => {
+      const cbName = '__gvizSheet2SchemaCb_' + Date.now() + '_' + Math.floor(Math.random() * 1e6);
+      const script = document.createElement('script');
+      let settled = false;
+
+      const cleanup = () => {
+        if (script.parentNode) script.parentNode.removeChild(script);
+        try { delete global[cbName]; } catch (_) { global[cbName] = undefined; }
+      };
+
+      const timer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        reject(new Error('Sheet2 schema timeout'));
+      }, timeoutMs);
+
+      global[cbName] = function (response) {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        cleanup();
+
+        if (!response || response.status === 'error' || !response.table) {
+          reject(new Error('Invalid Sheet2 schema response'));
+          return;
+        }
+
+        // GViz puts Row 1 into table.cols[].label when headers=1, OR row 0 when headers=0
+        const cols = (response.table.cols || []).slice(2).map(c => (c && c.label ? String(c.label).trim() : ''));
+        let candidates = cols.filter(Boolean);
+        if (!candidates.length && response.table.rows && response.table.rows[0]) {
+          candidates = (response.table.rows[0].c || []).slice(2).map(c => (c && (c.f || c.v) ? String(c.f || c.v).trim() : '')).filter(Boolean);
+        }
+
+        const schema = buildSheet2Schema(candidates);
+        if (!schema.order.length) {
+          reject(new Error('Empty Sheet2 schema'));
+          return;
+        }
+        resolve(schema);
+      };
+
+      const tq = encodeURIComponent('select * limit 1');
+      const url = `https://docs.google.com/spreadsheets/d/${encodeURIComponent(spreadsheetId)}/gviz/tq?sheet=${encodeURIComponent(schemaSheetName)}&headers=0&tq=${tq}&tqx=responseHandler:${cbName}&_ts=${Date.now()}`;
+      script.src = url;
+      script.async = true;
+      script.onerror = () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        cleanup();
+        reject(new Error('Sheet2 schema network error'));
+      };
+      document.head.appendChild(script);
+    });
+  }
+
+  /**
    * Method 4: Local Snapshot fallback (window.SHEET_SNAPSHOT)
    */
   function loadLocalSnapshot() {
@@ -293,22 +377,39 @@
         source: 'snapshot',
         sourceLabel: 'ข้อมูล Snapshot ในเครื่อง',
         fetchedAt: global.SHEET_SNAPSHOT.exportedAt || null,
-        rows: global.SHEET_SNAPSHOT.rows
+        rows: global.SHEET_SNAPSHOT.rows,
+        sheet2Schema: buildSheet2Schema(global.SHEET_SNAPSHOT.sheet2Columns || [])
       };
     }
     return null;
   }
 
   /**
-   * Master loader with smart fallback chain
+   * Master loader with smart fallback chain + live Sheet2 schema sync
    */
   async function fetchSheetData(settings) {
     const errors = [];
+    const fallbackSchema = (global.SHEET_SNAPSHOT && global.SHEET_SNAPSHOT.sheet2Columns)
+      ? buildSheet2Schema(global.SHEET_SNAPSHOT.sheet2Columns)
+      : { order: [], counts: {}, totalMachines: 0 };
+
+    // Try fetching live Sheet2 branch/machine schema in parallel (falls back silently to embedded Sheet2 schema)
+    let sheet2SchemaPromise = Promise.resolve(fallbackSchema);
+    if (settings.spreadsheetId && settings.spreadsheetId.trim()) {
+      sheet2SchemaPromise = fetchSheet2SchemaJsonp(
+        settings.spreadsheetId.trim(),
+        settings.schemaSheetName || 'Sheet2'
+      ).catch(() => fallbackSchema);
+    }
 
     // 1. Try Apps Script URL if configured
     if (settings.appsScriptUrl && settings.appsScriptUrl.trim()) {
       try {
-        return await fetchFromAppsScript(settings.appsScriptUrl);
+        const [res, sheet2Schema] = await Promise.all([
+          fetchFromAppsScript(settings.appsScriptUrl),
+          sheet2SchemaPromise
+        ]);
+        return { ...res, sheet2Schema };
       } catch (err) {
         errors.push(`Apps Script: ${err.message}`);
       }
@@ -317,7 +418,11 @@
     // 2. Try Google Visualization JSONP (direct live sync, zero CORS)
     if (settings.spreadsheetId && settings.spreadsheetId.trim()) {
       try {
-        return await fetchFromGvizJsonp(settings.spreadsheetId.trim(), settings.sheetName || 'Sheet1');
+        const [res, sheet2Schema] = await Promise.all([
+          fetchFromGvizJsonp(settings.spreadsheetId.trim(), settings.sheetName || 'Sheet1'),
+          sheet2SchemaPromise
+        ]);
+        return { ...res, sheet2Schema };
       } catch (err) {
         errors.push(`GViz Live: ${err.message}`);
       }
@@ -325,7 +430,11 @@
       // 3. Try direct CSV export when running on HTTP/HTTPS
       if (location.protocol === 'http:' || location.protocol === 'https:') {
         try {
-          return await fetchFromCsvExport(settings.spreadsheetId.trim(), settings.sheetGid || '0');
+          const [res, sheet2Schema] = await Promise.all([
+            fetchFromCsvExport(settings.spreadsheetId.trim(), settings.sheetGid || '0'),
+            sheet2SchemaPromise
+          ]);
+          return { ...res, sheet2Schema };
         } catch (err) {
           errors.push(`CSV Live: ${err.message}`);
         }
