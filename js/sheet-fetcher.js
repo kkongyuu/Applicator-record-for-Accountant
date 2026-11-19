@@ -338,11 +338,18 @@
           return;
         }
 
-        // GViz puts Row 1 into table.cols[].label when headers=1, OR row 0 when headers=0
-        const cols = (response.table.cols || []).slice(2).map(c => (c && c.label ? String(c.label).trim() : ''));
-        let candidates = cols.filter(Boolean);
-        if (!candidates.length && response.table.rows && response.table.rows[0]) {
-          candidates = (response.table.rows[0].c || []).slice(2).map(c => (c && (c.f || c.v) ? String(c.f || c.v).trim() : '')).filter(Boolean);
+        // With range=C1:AZ1&headers=0 there is only 1 row (100% text), so GViz never coerces columns to numbers!
+        let candidates = [];
+        if (response.table.rows && response.table.rows[0] && response.table.rows[0].c) {
+          candidates = response.table.rows[0].c
+            .map(c => (c && (c.f !== undefined && c.f !== null ? c.f : c.v)))
+            .map(v => String(v ?? '').trim())
+            .filter(Boolean);
+        }
+        if (!candidates.length && response.table.cols) {
+          candidates = response.table.cols
+            .map(c => (c && c.label ? String(c.label).trim() : ''))
+            .filter(Boolean);
         }
 
         const schema = buildSheet2Schema(candidates);
@@ -350,11 +357,11 @@
           reject(new Error('Empty Sheet2 schema'));
           return;
         }
-        resolve(schema);
+        resolve({ ...schema, schemaSource: 'live' });
       };
 
-      const tq = encodeURIComponent('select * limit 1');
-      const url = `https://docs.google.com/spreadsheets/d/${encodeURIComponent(spreadsheetId)}/gviz/tq?sheet=${encodeURIComponent(schemaSheetName)}&headers=0&tq=${tq}&tqx=responseHandler:${cbName}&_ts=${Date.now()}`;
+      // Restrict strictly to Row 1 (C1:AZ1) so numeric data in rows 2+ never causes GViz to null out text headers!
+      const url = `https://docs.google.com/spreadsheets/d/${encodeURIComponent(spreadsheetId)}/gviz/tq?sheet=${encodeURIComponent(schemaSheetName)}&range=C1:AZ1&headers=0&tqx=responseHandler:${cbName}&_ts=${Date.now()}`;
       script.src = url;
       script.async = true;
       script.onerror = () => {
