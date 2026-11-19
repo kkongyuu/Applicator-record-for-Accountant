@@ -4,12 +4,25 @@
 (function () {
   'use strict';
 
+  // Refined Fintech / Stripe-inspired categorical palette (restrained, cohesive)
   const PALETTE = [
-    '#1d4ed8', '#059669', '#4f46e5', '#d97706', '#0891b2',
-    '#dc2626', '#7c3aed', '#0d9488', '#ea580c', '#2563eb',
-    '#16a34a', '#9333ea', '#0284c7', '#ca8a04', '#e11d48',
-    '#6366f1', '#14b8a6', '#f97316', '#475569'
+    '#4f46e5', '#0f766e', '#2563eb', '#334155', '#0284c7',
+    '#6366f1', '#0d9488', '#475569', '#3b82f6', '#64748b',
+    '#818cf8', '#14b8a6', '#1e293b', '#0ea5e9', '#94a3b8',
+    '#4338ca', '#115e59', '#1d4ed8', '#cbd5e1'
   ];
+
+  const STRIPE_TOOLTIP = {
+    backgroundColor: '#101828',
+    titleColor: '#ffffff',
+    bodyColor: '#e4e7ec',
+    borderColor: 'rgba(255,255,255,0.08)',
+    borderWidth: 1,
+    padding: 10,
+    cornerRadius: 8,
+    titleFont: { weight: '600', size: 12 },
+    bodyFont: { size: 12 }
+  };
 
   const state = {
     settings: window.loadSavedSettings(),
@@ -87,9 +100,15 @@
 
   function setSyncUI(status, text) {
     const pill = document.getElementById('syncPill');
+    const titleEl = document.getElementById('syncTitle');
     const label = document.getElementById('syncText');
-    pill.className = `sync-pill ${status}`;
-    label.textContent = text;
+    if (pill) pill.className = `sync-card sync-pill ${status}`;
+    if (titleEl) {
+      titleEl.textContent = status === 'live'
+        ? 'Google Sheets สด'
+        : (status === 'loading' ? 'กำลังซิงค์ข้อมูล...' : 'โหมด Snapshot');
+    }
+    if (label) label.textContent = text;
   }
 
   function reprocessData() {
@@ -440,13 +459,14 @@
   function renderRankingPodium(items, isBranchView, asOfThai) {
     const el = document.getElementById('rankingPodium');
     if (!el) return;
-    const medals = ['🥇 อันดับ 1', '🥈 อันดับ 2', '🥉 อันดับ 3'];
     const top3 = items.slice(0, 3);
 
     if (!top3.length) {
       el.innerHTML = '';
       return;
     }
+
+    const maxVal = top3[0] ? getMetricDisplay(top3[0], isBranchView).val : 1;
 
     el.innerHTML = top3.map((item, idx) => {
       const disp = getMetricDisplay(item, isBranchView);
@@ -456,21 +476,39 @@
       const estDays = isBranchView ? item.peakEstDaysLeft : item.estDaysLeft;
 
       const statusPill = stale > 0
-        ? `<span class="badge badge-amber">ใช้วันล่าสุด ${escapeHtml(dateStr)} (ย้อนหลัง ${stale} วัน)</span>`
-        : `<span class="badge badge-emerald">ส่งแล้ว (${escapeHtml(asOfThai)})</span>`;
+        ? `<span class="badge badge-amber"><span class="status-dot warn"></span>${escapeHtml(dateStr)} (-${stale} วัน)</span>`
+        : `<span class="badge badge-emerald"><span class="status-dot ok"></span>ตรงวัน (${escapeHtml(asOfThai)})</span>`;
 
       const estPill = state.rankingMetric === 'latest_counter' && estDays !== null
-        ? `<span class="badge ${estDays <= 14 ? 'badge-rose' : 'badge-blue'}">คาดว่าอีก ~${estDays} วันครบ 10M</span>`
+        ? `<span class="badge ${estDays <= 14 ? 'badge-rose' : 'badge-slate'}">อีก ~${estDays} วันครบ 10M</span>`
         : '';
+
+      const pctWidth = state.rankingMetric === 'latest_counter'
+        ? (isBranchView ? item.peakPct : item.usedPct)
+        : (maxVal > 0 ? (disp.val / maxVal) * 100 : 0);
+
+      const barCls = state.rankingMetric === 'latest_counter'
+        ? (disp.val >= 9000000 ? 'danger' : (disp.val >= 8000000 ? 'warn' : ''))
+        : '';
+
+      const rankNumStr = `0${idx + 1}`;
 
       return `
         <article class="podium-card rank-${idx + 1}">
           <div class="podium-top">
-            <span class="podium-medal">${medals[idx]}</span>
+            <span class="podium-rank-num">
+              <span class="rank-index-pill num">${rankNumStr}</span>
+              <span>อันดับที่ ${idx + 1}</span>
+            </span>
             ${statusPill}
           </div>
-          <div class="podium-name">${escapeHtml(name)}</div>
-          <div class="podium-metric num">${fmtInt(disp.val)} <span style="font-size:13px;font-weight:500;color:var(--text-muted);">${escapeHtml(disp.unit)}</span></div>
+          <div>
+            <div class="podium-name">${escapeHtml(name)}</div>
+            <div class="podium-metric num">${fmtInt(disp.val)}<span class="podium-unit">${escapeHtml(disp.unit)}</span></div>
+          </div>
+          <div class="podium-bar">
+            <div class="podium-bar-fill ${barCls}" style="width:${Math.min(100, Math.max(4, pctWidth)).toFixed(1)}%;"></div>
+          </div>
           <div class="podium-meta">
             <span>${escapeHtml(disp.sub)}</span>
             ${estPill}
@@ -486,9 +524,12 @@
     const titleEl = document.getElementById('rankingChartTitle');
     if (!ctx || typeof Chart === 'undefined') return;
 
-    // Adjust chart height cleanly for 18 branches vs 27 heads
+    Chart.defaults.font.family = "'Inter', 'IBM Plex Sans Thai', sans-serif";
+    Chart.defaults.color = '#667085';
+
+    // Adjust chart height cleanly for 19 branches vs 31 heads
     if (container) {
-      container.style.height = Math.max(400, items.length * 26 + 70) + 'px';
+      container.style.height = Math.max(400, items.length * 26 + 64) + 'px';
     }
 
     const metricTitleMap = {
@@ -501,19 +542,20 @@
     const labels = items.map((item, idx) => {
       const baseName = isBranchView ? item.branch : item.displayLabel;
       const stale = isBranchView ? item.maxStale : item.staleDays;
-      return `#${idx + 1} ${baseName}${stale > 0 ? ' *' : ''}`;
+      return `${String(idx + 1).padStart(2, '0')}  ${baseName}${stale > 0 ? ' *' : ''}`;
     });
 
     const values = items.map(item => getMetricDisplay(item, isBranchView).val);
-    const colors = items.map(item => {
+    const colors = items.map((item, idx) => {
       if (state.rankingMetric === 'latest_counter') {
         const v = isBranchView ? item.peakVal : item.curVal;
-        if (v >= 9000000) return '#dc2626';
+        if (v >= 9000000) return '#e11d48';
         if (v >= 8000000) return '#d97706';
-        return '#1d4ed8';
+        return '#4f46e5';
       }
       const stale = isBranchView ? item.maxStale : item.staleDays;
-      return stale > 0 ? '#f59e0b' : '#1d4ed8';
+      if (stale > 0) return '#d97706';
+      return idx < 3 ? '#101828' : '#6366f1';
     });
 
     state.charts.ranking = new Chart(ctx, {
@@ -524,7 +566,8 @@
           label: metricTitleMap[state.rankingMetric],
           data: values,
           backgroundColor: colors,
-          borderRadius: 5
+          borderRadius: 4,
+          barThickness: 16
         }]
       },
       options: {
@@ -535,13 +578,20 @@
           x: {
             beginAtZero: true,
             max: state.rankingMetric === 'latest_counter' ? 10000000 : undefined,
-            ticks: { callback: v => fmtInt(v) }
+            border: { display: false },
+            grid: { color: '#f2f4f7' },
+            ticks: { callback: v => fmtInt(v), font: { size: 11 } }
           },
-          y: { grid: { display: false } }
+          y: {
+            border: { display: false },
+            grid: { display: false },
+            ticks: { color: '#344054', font: { size: 12, weight: '500' } }
+          }
         },
         plugins: {
           legend: { display: false },
           tooltip: {
+            ...STRIPE_TOOLTIP,
             callbacks: {
               label: c => {
                 const item = items[c.dataIndex];
@@ -601,18 +651,18 @@
           : '-';
 
         const statusHtml = item.anyFallback
-          ? `<span class="badge badge-amber">ใช้วันล่าสุดแทน (${escapeHtml(item.latestThaiDate)} • ย้อนหลัง ${item.maxStale} วัน)</span>`
-          : `<span class="badge badge-emerald">✓ ส่งครบตรงวัน</span>`;
+          ? `<span class="badge badge-amber"><span class="status-dot warn"></span>${escapeHtml(item.latestThaiDate)} (-${item.maxStale} วัน)</span>`
+          : `<span class="badge badge-emerald"><span class="status-dot ok"></span>ส่งครบตรงวัน</span>`;
 
         return `
           <tr>
-            <td><span class="rank-badge ${rCls}">#${rank}</span></td>
-            <td><strong>${escapeHtml(item.branch)}</strong> <span style="font-size:11.5px;color:var(--text-muted);">(${item.machineCount} หัว)</span></td>
+            <td><span class="rank-badge num ${rCls}">${String(rank).padStart(2, '0')}</span></td>
+            <td><strong>${escapeHtml(item.branch)}</strong> <span style="font-size:11.5px;color:var(--ink-tertiary);">(${item.machineCount} หัว)</span></td>
             <td class="right">${formatHeadCell(h1)}</td>
             <td class="right">${formatHeadCell(h2)}</td>
             <td class="right">
               <div class="head-pill" style="align-items:flex-end;">
-                <span class="num"><strong>${item.peakPct.toFixed(1)}%</strong> <span style="color:var(--text-muted);">(เหลือ ${fmtInt(item.peakRemaining)})</span></span>
+                <span class="num"><strong>${item.peakPct.toFixed(1)}%</strong> <span style="color:var(--ink-tertiary);">(เหลือ ${fmtInt(item.peakRemaining)})</span></span>
                 <div class="mini-bar-wrap"><div class="progress-track" style="margin:2px 0 0;"><div class="progress-fill ${barCls}" style="width:${item.peakPct.toFixed(1)}%;"></div></div></div>
               </div>
             </td>
@@ -645,14 +695,14 @@
           ? `<span class="badge ${h.estDaysLeft <= 14 ? 'badge-rose' : (h.estDaysLeft <= 30 ? 'badge-amber' : 'badge-slate')}">~${h.estDaysLeft} วัน</span>`
           : '-';
         const dateBadge = h.staleDays > 0
-          ? `<span class="badge badge-amber">${escapeHtml(h.latestThaiDate)} (ย้อนหลัง ${h.staleDays} วัน)</span>`
-          : `<span class="badge badge-emerald">${escapeHtml(h.latestThaiDate)} (ตรงวัน)</span>`;
+          ? `<span class="badge badge-amber"><span class="status-dot warn"></span>${escapeHtml(h.latestThaiDate)} (-${h.staleDays} วัน)</span>`
+          : `<span class="badge badge-emerald"><span class="status-dot ok"></span>${escapeHtml(h.latestThaiDate)}</span>`;
 
         return `
           <tr>
-            <td><span class="rank-badge ${rCls}">#${rank}</span></td>
+            <td><span class="rank-badge num ${rCls}">${String(rank).padStart(2, '0')}</span></td>
             <td><strong>${escapeHtml(h.branch)}</strong></td>
-            <td>หัว ${h.headNum} <span style="font-size:12px;color:var(--text-muted);">(${escapeHtml(h.headLabel)})</span></td>
+            <td>หัว ${h.headNum} <span style="font-size:12px;color:var(--ink-tertiary);">(${escapeHtml(h.headLabel)})</span></td>
             <td class="right num"><strong>${fmtInt(h.curVal)}</strong></td>
             <td class="right num">${fmtInt(h.remaining)}</td>
             <td class="right">
@@ -875,7 +925,7 @@
       const bTotal = branchTotals.get(b) || 0;
       const mc = state.processed.branchMeta[b]?.machineCount || 1;
       bodyHtml += `<tr>`;
-      bodyHtml += `<td class="col-branch">${escapeHtml(b)} <span style="font-size:11px;color:var(--text-muted);font-weight:500;">(${mc} เครื่อง)</span></td>`;
+      bodyHtml += `<td class="col-branch">${escapeHtml(b)} <span style="font-size:11px;color:var(--ink-tertiary);font-weight:500;">(${mc} เครื่อง)</span></td>`;
 
       for (const ck of colKeys) {
         const key = `${b}|${ck}`;
@@ -888,7 +938,7 @@
 
         const intensity = maxCellVal > 0 ? Math.min(1, cell.sum / maxCellVal) : 0;
         const bgStyle = cell.sum > 0
-          ? `background: rgba(29, 78, 216, ${(0.04 + intensity * 0.20).toFixed(3)});`
+          ? `background: rgba(79, 70, 229, ${(0.03 + intensity * 0.14).toFixed(3)});`
           : '';
 
         const hasSwap = cell.events.some(e => e.status === 'HEAD_SWAP_NEW' || e.status === 'HEAD_SWAP_USED');
@@ -982,7 +1032,7 @@
           daySum += ev.shotsUsed;
           trackSums[idx] += ev.shotsUsed;
           cells += `<td class="right num">${fmtInt(ev.curVal)}</td>`;
-          cells += `<td class="right num" style="color:var(--brand);font-weight:600;">${ev.shotsUsed > 0 ? '+' + fmtInt(ev.shotsUsed) : '0'}</td>`;
+          cells += `<td class="right num" style="color:var(--accent);font-weight:600;">${ev.shotsUsed > 0 ? '+' + fmtInt(ev.shotsUsed) : '0'}</td>`;
           if (ev.status === 'HEAD_SWAP_NEW') notes.push(`<span class="badge badge-blue">หัว ${idx + 1} เปลี่ยนหัวใหม่</span>`);
           else if (ev.status === 'HEAD_SWAP_USED') notes.push(`<span class="badge badge-amber">หัว ${idx + 1} สลับหัวสำรอง</span>`);
           else if (ev.status === 'MULTI_DAY') notes.push(`<span class="badge badge-amber">หัว ${idx + 1} สะสม ${ev.dayGap} วัน</span>`);
@@ -992,21 +1042,21 @@
 
       grandSum += daySum;
       cells += `<td class="right num"><strong>${fmtInt(daySum)}</strong></td>`;
-      cells += `<td>${notes.length ? notes.join(' ') : '<span style="color:var(--emerald);font-size:12px;">✓ ปกติ</span>'}</td>`;
+      cells += `<td>${notes.length ? notes.join(' ') : '<span class="badge badge-emerald"><span class="status-dot ok"></span>ปกติ</span>'}</td>`;
       bHtml += `<tr>${cells}</tr>`;
     }
 
     if (!sortedDates.length) {
-      bHtml = `<tr><td colspan="${tracks.length * 2 + 3}" style="text-align:center;color:var(--text-muted);padding:20px;">ไม่พบข้อมูลในช่วงเวลาที่เลือก</td></tr>`;
+      bHtml = `<tr><td colspan="${tracks.length * 2 + 3}" style="text-align:center;color:var(--ink-tertiary);padding:20px;">ไม่พบข้อมูลในช่วงเวลาที่เลือก</td></tr>`;
     }
     tbody.innerHTML = bHtml;
 
     // Footer totals
     let fHtml = `<tr style="background:#f1f5f9;font-weight:700;"><td>รวม (${sortedDates.length} วัน)</td>`;
     tracks.forEach((_, idx) => {
-      fHtml += `<td class="right">-</td><td class="right num" style="color:var(--brand);">${fmtInt(trackSums[idx])}</td>`;
+      fHtml += `<td class="right">-</td><td class="right num" style="color:var(--accent);">${fmtInt(trackSums[idx])}</td>`;
     });
-    fHtml += `<td class="right num" style="color:var(--brand);">${fmtInt(grandSum)}</td><td></td></tr>`;
+    fHtml += `<td class="right num" style="color:var(--accent);">${fmtInt(grandSum)}</td><td></td></tr>`;
     tfoot.innerHTML = fHtml;
   }
 
@@ -1054,7 +1104,7 @@
     });
 
     if (!list.length) {
-      html = `<tr><td colspan="${showCost ? 9 : 8}" style="text-align:center;color:var(--text-muted);padding:24px;">ไม่พบข้อมูลในช่วงเวลาที่เลือก</td></tr>`;
+      html = `<tr><td colspan="${showCost ? 9 : 8}" style="text-align:center;color:var(--ink-tertiary);padding:24px;">ไม่พบข้อมูลในช่วงเวลาที่เลือก</td></tr>`;
     }
     tbody.innerHTML = html;
   }
@@ -1069,8 +1119,8 @@
 
   function renderCharts(events) {
     if (typeof Chart === 'undefined') return;
-    Chart.defaults.font.family = "'Sarabun', sans-serif";
-    Chart.defaults.color = '#475569';
+    Chart.defaults.font.family = "'Inter', 'IBM Plex Sans Thai', sans-serif";
+    Chart.defaults.color = '#667085';
 
     renderDailyTrendChart(events);
     renderBranchBarAndShareCharts(events);
@@ -1121,18 +1171,18 @@
           type: 'bar',
           label: 'ยอดใช้ช็อตรายวัน',
           data: values,
-          backgroundColor: 'rgba(29, 78, 216, 0.78)',
-          hoverBackgroundColor: '#1e40af',
-          borderRadius: 5,
+          backgroundColor: 'rgba(79, 70, 229, 0.84)',
+          hoverBackgroundColor: '#4338ca',
+          borderRadius: 4,
           order: 2
         },
         {
           type: 'line',
           label: `ค่าเฉลี่ย (${fmtInt(avg)})`,
           data: sortedDates.map(() => Math.round(avg)),
-          borderColor: '#d97706',
-          borderWidth: 2,
-          borderDash: [6, 4],
+          borderColor: '#101828',
+          borderWidth: 1.5,
+          borderDash: [5, 4],
           pointRadius: 0,
           fill: false,
           order: 1
@@ -1155,16 +1205,19 @@
         maintainAspectRatio: false,
         interaction: { mode: 'index', intersect: false },
         scales: {
-          x: { stacked: state.selectedBranch !== 'ALL', grid: { display: false } },
+          x: { stacked: state.selectedBranch !== 'ALL', border: { display: false }, grid: { display: false } },
           y: {
             stacked: state.selectedBranch !== 'ALL',
             beginAtZero: true,
+            border: { display: false },
+            grid: { color: '#f2f4f7' },
             ticks: { callback: v => fmtInt(v) }
           }
         },
         plugins: {
-          legend: { position: 'top' },
+          legend: { position: 'top', labels: { usePointStyle: true, boxWidth: 8 } },
           tooltip: {
+            ...STRIPE_TOOLTIP,
             callbacks: {
               label: c => `${c.dataset.label}: ${fmtInt(c.parsed.y)} ช็อต`
             }
@@ -1200,10 +1253,11 @@
           label: 'ยอดใช้ช็อตรวม',
           data: values,
           backgroundColor: labels.map((b, i) => {
-            if (state.selectedBranch !== 'ALL' && b !== state.selectedBranch) return '#cbd5e1';
-            return PALETTE[i % PALETTE.length];
+            if (state.selectedBranch !== 'ALL' && b !== state.selectedBranch) return '#e4e7ec';
+            return i < 3 ? '#101828' : '#4f46e5';
           }),
-          borderRadius: 5
+          borderRadius: 4,
+          barThickness: 15
         }]
       },
       options: {
@@ -1219,12 +1273,13 @@
           }
         },
         scales: {
-          x: { beginAtZero: true, ticks: { callback: v => fmtInt(v) } },
-          y: { grid: { display: false } }
+          x: { beginAtZero: true, border: { display: false }, grid: { color: '#f2f4f7' }, ticks: { callback: v => fmtInt(v) } },
+          y: { border: { display: false }, grid: { display: false }, ticks: { color: '#344054', font: { weight: '500' } } }
         },
         plugins: {
           legend: { display: false },
           tooltip: {
+            ...STRIPE_TOOLTIP,
             callbacks: {
               label: c => `${fmtInt(c.parsed.x)} ช็อต`
             }
@@ -1261,8 +1316,9 @@
         maintainAspectRatio: false,
         cutout: '58%',
         plugins: {
-          legend: { position: 'bottom', labels: { boxWidth: 11, padding: 10, font: { size: 12 } } },
+          legend: { position: 'bottom', labels: { usePointStyle: true, boxWidth: 8, padding: 12, font: { size: 11.5 } } },
           tooltip: {
+            ...STRIPE_TOOLTIP,
             callbacks: {
               label: c => {
                 const pct = grand > 0 ? ((c.parsed / grand) * 100).toFixed(1) : '0.0';
@@ -1299,9 +1355,10 @@
           label: state.selectedBranch === 'ALL' ? 'ยอดใช้ช็อตรวมทุกสาขา' : `สาขา${state.selectedBranch}`,
           data: values,
           backgroundColor: monthsAsc.map(m =>
-            m.monthKey === state.selectedMonth ? '#1d4ed8' : 'rgba(59, 130, 246, 0.45)'
+            m.monthKey === state.selectedMonth ? '#101828' : '#c7d2fe'
           ),
-          borderRadius: 6
+          hoverBackgroundColor: '#4f46e5',
+          borderRadius: 5
         }]
       },
       options: {
@@ -1315,12 +1372,13 @@
           }
         },
         scales: {
-          x: { grid: { display: false } },
-          y: { beginAtZero: true, ticks: { callback: v => fmtInt(v) } }
+          x: { border: { display: false }, grid: { display: false } },
+          y: { beginAtZero: true, border: { display: false }, grid: { color: '#f2f4f7' }, ticks: { callback: v => fmtInt(v) } }
         },
         plugins: {
-          legend: { position: 'top' },
+          legend: { display: false },
           tooltip: {
+            ...STRIPE_TOOLTIP,
             callbacks: {
               label: c => `${fmtInt(c.parsed.y)} ช็อต`
             }
@@ -1361,7 +1419,7 @@
           : (isWarn ? '<span class="badge badge-amber">เตรียมสำรองหัว</span>' : '<span class="badge badge-emerald">ปกติ</span>');
 
         const swapNote = t.headSwaps.length > 0
-          ? `<div style="margin-top:6px;font-size:11.5px;color:var(--indigo);">🔄 เปลี่ยนหัวแล้ว ${t.headSwaps.length} ครั้ง (ล่าสุด ${t.headSwaps[t.headSwaps.length - 1].thaiDate})</div>`
+          ? `<div style="margin-top:6px;font-size:11.5px;color:var(--accent);">เปลี่ยนหัวแล้ว ${t.headSwaps.length} ครั้ง (ล่าสุด ${t.headSwaps[t.headSwaps.length - 1].thaiDate})</div>`
           : '';
 
         tracksHtml += `
@@ -1377,7 +1435,7 @@
               <span>มิเตอร์ล่าสุด: <strong class="num">${fmtInt(t.lastVal)}</strong></span>
               <span>คงเหลือ: <strong class="num">${fmtInt(t.remaining)}</strong></span>
             </div>
-            <div class="machine-stats" style="margin-top:3px;color:var(--text-muted);">
+            <div class="machine-stats" style="margin-top:3px;color:var(--ink-tertiary);">
               <span>อัปเดตล่าสุด: ${escapeHtml(t.lastThaiDate)}</span>
               <span>ใช้ไป ${t.usedPct.toFixed(1)}%</span>
             </div>
@@ -1433,7 +1491,7 @@
           <td class="num">${escapeHtml(a.thaiDate)}</td>
           <td><strong>${escapeHtml(a.branch)}</strong></td>
           <td><span class="badge ${badgeCls}">${escapeHtml(a.typeLabel)}</span></td>
-          <td style="font-size:12.5px;color:var(--text-secondary);">${escapeHtml(a.machineId)}</td>
+          <td style="font-size:12.5px;color:var(--ink-secondary);">${escapeHtml(a.machineId)}</td>
           <td class="right num"><code>${escapeHtml(a.rawCurrent || '-')}</code></td>
           <td class="right num">${a.prevVal !== null ? fmtInt(a.prevVal) : '-'}</td>
           <td style="font-size:12.5px;">${escapeHtml(a.message)}</td>
@@ -1441,7 +1499,7 @@
     }
 
     if (!slice.length) {
-      html = `<tr><td colspan="7" style="text-align:center;color:var(--text-muted);padding:28px;">ไม่พบรายการผิดปกติตามเงื่อนไขที่เลือก</td></tr>`;
+      html = `<tr><td colspan="7" style="text-align:center;color:var(--ink-tertiary);padding:28px;">ไม่พบรายการผิดปกติตามเงื่อนไขที่เลือก</td></tr>`;
     }
     tbody.innerHTML = html;
   }
@@ -1478,7 +1536,7 @@
         <tr>
           <td class="num">${escapeHtml(ev.thaiDate)}</td>
           <td>${escapeHtml(ev.machineLabel)}</td>
-          <td class="right num">${ev.prevVal !== null ? fmtInt(ev.prevVal) : '-'}<br><span style="font-size:11px;color:var(--text-muted);">${escapeHtml(ev.prevThaiDate || '')}</span></td>
+          <td class="right num">${ev.prevVal !== null ? fmtInt(ev.prevVal) : '-'}<br><span style="font-size:11px;color:var(--ink-tertiary);">${escapeHtml(ev.prevThaiDate || '')}</span></td>
           <td class="right num">${fmtInt(ev.curVal)}</td>
           <td class="right num"><strong>${fmtInt(ev.shotsUsed)}</strong></td>
           <td>${badge}</td>
@@ -1486,12 +1544,12 @@
     }
 
     document.getElementById('drillModalBody').innerHTML = `
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;padding:12px 14px;background:var(--brand-softer);border-radius:10px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;padding:12px 14px;background:var(--accent-soft);border-radius:10px;">
         <div>
-          <div style="font-size:12.5px;color:var(--text-secondary);">ยอดช็อตที่ใช้รวม (${events.length} รายการ)</div>
-          <div style="font-size:24px;font-weight:700;color:var(--brand);" class="num">${fmtInt(total)} ช็อต</div>
+          <div style="font-size:12.5px;color:var(--ink-secondary);">ยอดช็อตที่ใช้รวม (${events.length} รายการ)</div>
+          <div style="font-size:24px;font-weight:700;color:var(--accent);" class="num">${fmtInt(total)} ช็อต</div>
         </div>
-        ${state.costPerShot > 0 ? `<div style="text-align:right;"><div style="font-size:12px;color:var(--text-secondary);">ประมาณการต้นทุน</div><div style="font-size:18px;font-weight:700;color:var(--emerald);" class="num">฿${fmtMoney(total * state.costPerShot)}</div></div>` : ''}
+        ${state.costPerShot > 0 ? `<div style="text-align:right;"><div style="font-size:12px;color:var(--ink-secondary);">ประมาณการต้นทุน</div><div style="font-size:18px;font-weight:700;color:var(--emerald);" class="num">฿${fmtMoney(total * state.costPerShot)}</div></div>` : ''}
       </div>
       <div class="table-scroll" style="max-height:420px;">
         <table class="simple-table">
@@ -1613,14 +1671,28 @@
   }
 
   function switchTab(tabId) {
-    document.querySelectorAll('.tab-btn').forEach(btn => {
+    let activeNav = null;
+    document.querySelectorAll('.nav-item[data-tab], .tab-btn[data-tab]').forEach(btn => {
       const active = btn.dataset.tab === tabId;
       btn.classList.toggle('active', active);
       btn.setAttribute('aria-selected', String(active));
+      if (active) activeNav = btn;
     });
     document.querySelectorAll('.tab-panel').forEach(panel => {
       panel.classList.toggle('active', panel.id === tabId);
     });
+    if (activeNav) {
+      const titleEl = document.getElementById('pageTitle');
+      const subEl = document.getElementById('pageSubtitle');
+      if (titleEl && activeNav.dataset.title) titleEl.textContent = activeNav.dataset.title;
+      if (subEl && activeNav.dataset.subtitle) subEl.textContent = activeNav.dataset.subtitle;
+    }
+    // Close mobile sidebar drawer on selection
+    const sb = document.getElementById('sidebar');
+    const ov = document.getElementById('sidebarOverlay');
+    if (sb) sb.classList.remove('open');
+    if (ov) ov.classList.remove('open');
+
     if (tabId === 'tab-overview' && state.processed) {
       // Ensure Chart.js resizes cleanly when tab becomes visible
       setTimeout(() => renderCharts(getActiveEvents()), 30);
@@ -1688,9 +1760,23 @@
       renderAll();
     });
 
-    document.querySelectorAll('.tab-btn').forEach(btn => {
+    document.querySelectorAll('.nav-item[data-tab], .tab-btn[data-tab]').forEach(btn => {
       btn.addEventListener('click', () => switchTab(btn.dataset.tab));
     });
+
+    const btnMob = document.getElementById('btnMobileMenu');
+    const sbEl = document.getElementById('sidebar');
+    const ovEl = document.getElementById('sidebarOverlay');
+    if (btnMob && sbEl && ovEl) {
+      btnMob.addEventListener('click', () => {
+        sbEl.classList.toggle('open');
+        ovEl.classList.toggle('open');
+      });
+      ovEl.addEventListener('click', () => {
+        sbEl.classList.remove('open');
+        ovEl.classList.remove('open');
+      });
+    }
 
     document.getElementById('kpiAuditCard').addEventListener('click', () => switchTab('tab-audit'));
 

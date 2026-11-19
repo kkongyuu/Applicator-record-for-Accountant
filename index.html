@@ -3,12 +3,12 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>สรุปการใช้ช็อตรายวันแยกสาขา — Applicator Accounting Dashboard</title>
+  <title>Applicator Ledger — สรุปช็อตรายวันสำหรับฝ่ายบัญชี</title>
 
-  <!-- Thai-friendly Typography -->
+  <!-- Modern Fintech Typography: Inter (Tabular Numerals) + IBM Plex Sans Thai -->
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
 
   <!-- Chart.js 4 -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
@@ -16,416 +16,522 @@
   <link rel="stylesheet" href="css/styles.css" />
 </head>
 <body>
-  <!-- Top Header -->
-  <header class="topbar">
-    <div class="topbar-inner">
-      <div class="brand-block">
-        <div class="brand-icon" aria-hidden="true">📊</div>
-        <div>
-          <h1 class="brand-title">สรุปการใช้ช็อตรายวันแยกตามสาขา (สำหรับฝ่ายบัญชี)</h1>
-          <p class="brand-subtitle">Applicator Shot Usage Dashboard — อ้างอิงโครงสร้างสาขา/เครื่อง (ไม่เกิน 2 เครื่อง) จาก Sheet2 • ดึงสดอัตโนมัติ</p>
+  <div class="app-shell">
+    <!-- Mobile Drawer Overlay -->
+    <div id="sidebarOverlay" class="sidebar-overlay"></div>
+
+    <!-- Left Navigation Sidebar (Linear / Stripe / Mercury style) -->
+    <aside id="sidebar" class="sidebar" aria-label="เมนูหลัก">
+      <div class="sidebar-brand">
+        <div class="brand-mark" aria-hidden="true">
+          <svg class="icon" viewBox="0 0 24 24">
+            <path d="M3 3v18h18" />
+            <path d="M7 15l4-4 3 3 5-6" />
+          </svg>
+        </div>
+        <div class="brand-meta">
+          <div class="brand-name">Applicator Ledger</div>
+          <div class="brand-tag">ระบบสรุปช็อตฝ่ายบัญชี</div>
         </div>
       </div>
 
-      <div class="topbar-actions">
-        <div id="syncPill" class="sync-pill loading" title="สถานะการเชื่อมต่อ Google Sheets">
-          <span class="sync-dot"></span>
-          <span id="syncText">กำลังดึงข้อมูลจาก Google Sheet...</span>
-        </div>
-        <button id="btnRefresh" class="btn btn-glass" type="button" title="ดึงข้อมูลล่าสุดจาก Google Sheet ทันที">
-          🔄 ดึงข้อมูลล่าสุด
+      <div class="sidebar-section-label">มุมมองรายงาน</div>
+      <nav class="sidebar-nav" role="tablist">
+        <button class="nav-item active" role="tab" data-tab="tab-ranking" aria-selected="true"
+          data-title="จัดอันดับหัวล่าสุดและรายสาขา"
+          data-subtitle="อ้างอิงหัวที่ส่งเข้ามาล่าสุด หากวันนั้นขาดส่งระบบจะดึงวันล่าสุดที่มีมาจัดอันดับแทนอัตโนมัติ">
+          <svg class="icon" viewBox="0 0 24 24">
+            <path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6" />
+            <path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18" />
+            <path d="M4 22h16" />
+            <path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22" />
+            <path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22" />
+            <path d="M18 2H6v7a6 6 0 0 0 12 0V2Z" />
+          </svg>
+          <span class="nav-item-label">จัดอันดับ (Ranking)</span>
         </button>
-        <button id="btnExportMatrix" class="btn btn-emerald" type="button" title="ส่งออกตารางรายสาขา × รายวัน เป็นไฟล์ CSV สำหรับ Excel">
-          📥 ส่งออก Excel (.csv)
+
+        <button class="nav-item" role="tab" data-tab="tab-matrix" aria-selected="false"
+          data-title="ตารางสรุปบัญชีรายวัน"
+          data-subtitle="สรุปยอดใช้ช็อตแยกสาขา × รายวัน และตารางเทียบมิเตอร์แยกหัว (หัว 1 / หัว 2)">
+          <svg class="icon" viewBox="0 0 24 24">
+            <rect width="18" height="18" x="3" y="3" rx="2" />
+            <path d="M3 9h18" />
+            <path d="M3 15h18" />
+            <path d="M9 3v18" />
+          </svg>
+          <span class="nav-item-label">ตารางสรุปบัญชี</span>
         </button>
-        <button id="btnPrint" class="btn btn-glass" type="button" title="พิมพ์รายงานสำหรับฝ่ายบัญชี">
-          🖨️ พิมพ์
+
+        <button class="nav-item" role="tab" data-tab="tab-overview" aria-selected="false"
+          data-title="วิเคราะห์แนวโน้มและกราฟ"
+          data-subtitle="กราฟเปรียบเทียบปริมาณการใช้ช็อตรายวัน รายสาขา และรายเดือนทั้งปี">
+          <svg class="icon" viewBox="0 0 24 24">
+            <path d="M3 3v18h18" />
+            <rect width="4" height="7" x="7" y="10" rx="1" />
+            <rect width="4" height="12" x="15" y="5" rx="1" />
+          </svg>
+          <span class="nav-item-label">กราฟวิเคราะห์</span>
         </button>
-        <button id="btnSettings" class="btn btn-glass" type="button" title="ตั้งค่าการเชื่อมต่อ Google Sheets">
-          ⚙️ ตั้งค่า
+
+        <button class="nav-item" role="tab" data-tab="tab-machines" aria-selected="false"
+          data-title="สถานะเครื่องและอายุหัว (10M)"
+          data-subtitle="ติดตามเลขมิเตอร์ล่าสุดและช็อตคงเหลือของหัว Applicator ทุกเครื่องในแต่ละสาขา">
+          <svg class="icon" viewBox="0 0 24 24">
+            <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
+          </svg>
+          <span class="nav-item-label">สถานะหัว (10M)</span>
         </button>
-      </div>
-    </div>
-  </header>
 
-  <main class="container">
-    <!-- Live Sync Guidance Banner (shown only when falling back to snapshot) -->
-    <div id="snapshotBanner" class="banner" role="alert">
-      <div class="banner-text">
-        <strong>ℹ️ ขณะนี้กำลังแสดงข้อมูล Snapshot ล่าสุด</strong> —
-        ระบบพยายามดึงข้อมูลสดจาก Google Sheet แล้วแต่ยังติดสิทธิ์การเข้าถึง (Private)
-        หากต้องการให้ดึงข้อมูลสดอัตโนมัติทุกครั้งที่เปิดเว็บ ให้ตั้งค่าแชร์ Google Sheet เป็น <em>"ผู้ที่มีลิงก์สามารถดูได้"</em> หรือวาง Apps Script URL ในปุ่มตั้งค่า
-      </div>
-      <button id="btnOpenSetupFromBanner" class="btn btn-outline btn-sm" type="button">ดูวิธีเปิดดึงข้อมูลสด</button>
-    </div>
-
-    <!-- Filter & Accounting Controls -->
-    <section class="control-bar" aria-label="ตัวกรองข้อมูลบัญชี">
-      <div class="control-group">
-        <label for="scopeSelect">อ้างอิงโครงสร้างสาขา/เครื่อง</label>
-        <select id="scopeSelect">
-          <option value="sheet2">อิงตาม Sheet2 เป็นหลัก (1–2 เครื่อง)</option>
-          <option value="all">รวมสาขาอื่นใน Sheet1 (สูงสุด 2 เครื่อง)</option>
-        </select>
-      </div>
-
-      <div class="control-group">
-        <label for="monthSelect">เดือนบัญชี</label>
-        <select id="monthSelect"></select>
-      </div>
-
-      <div class="control-group">
-        <label for="branchSelect">สาขา</label>
-        <select id="branchSelect"></select>
-      </div>
-
-      <div class="control-group" style="min-width: 245px;">
-        <label>การจัดการวันที่ขาดส่ง / OCR พลาด</label>
-        <div class="segmented" role="group" aria-label="โหมดคำนวณวันขาดส่ง">
-          <button type="button" id="modeActualBtn" class="active" data-mode="actual" title="แสดงยอดผลต่างจริงในวันที่บันทึก (ตรงตามมิเตอร์ 100%)">ตามวันที่บันทึกจริง</button>
-          <button type="button" id="modeProrateBtn" data-mode="prorate" title="เฉลี่ยยอดวันขาดส่งกระจายให้แต่ละวันเท่าๆ กัน (ยอดรวมทั้งเดือนเท่าเดิม)">เฉลี่ยวันขาดส่ง</button>
-        </div>
-      </div>
-
-      <div class="control-group" style="min-width: 150px; max-width: 175px;">
-        <label for="costPerShotInput">ต้นทุน/ช็อต (บาท, ถ้ามี)</label>
-        <input id="costPerShotInput" type="number" step="0.001" min="0" placeholder="เช่น 0.05" />
-      </div>
-
-      <div class="control-spacer"></div>
-
-      <div class="control-group" style="min-width: auto;">
-        <label>ส่งออกละเอียด</label>
-        <button id="btnExportDetail" class="btn btn-outline" type="button" title="ส่งออกรายการคำนวณทีละเครื่อง ทีละวัน พร้อมเลขมิเตอร์ก่อน-หลัง">
-          📄 ส่งออกบัญชีรายเครื่อง (.csv)
+        <button class="nav-item" role="tab" data-tab="tab-audit" aria-selected="false"
+          data-title="รายการตรวจสอบสำหรับบัญชี"
+          data-subtitle="บันทึก Audit Trail สำหรับค่า OCR พลาด การเปลี่ยนหัว และวันขาดส่ง เพื่อตรวจสอบย้อนกลับ">
+          <svg class="icon" viewBox="0 0 24 24">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10" />
+            <path d="M12 8v4" />
+            <path d="M12 16h.01" />
+          </svg>
+          <span class="nav-item-label">ตรวจสอบบัญชี</span>
+          <span id="tabAuditCount" class="nav-count num">0</span>
         </button>
-      </div>
-    </section>
+      </nav>
 
-    <!-- KPI Cards -->
-    <section class="kpi-grid" aria-label="สรุปตัวเลขสำคัญ">
-      <article class="kpi-card">
-        <div class="kpi-label">
-          <span>ยอดใช้ช็อตรวมทั้งหมด</span>
-          <span id="kpiPeriodBadge" class="badge badge-blue">-</span>
-        </div>
-        <div id="kpiTotalShots" class="kpi-value num">-</div>
-        <div id="kpiTotalSub" class="kpi-sub">-</div>
-      </article>
-
-      <article class="kpi-card emerald">
-        <div class="kpi-label">
-          <span>เฉลี่ยการใช้ต่อวัน</span>
-          <span class="badge badge-emerald">รายวัน</span>
-        </div>
-        <div id="kpiAvgDaily" class="kpi-value num">-</div>
-        <div id="kpiPeakDaySub" class="kpi-sub">-</div>
-      </article>
-
-      <article class="kpi-card indigo">
-        <div class="kpi-label">
-          <span>สาขาที่ใช้ช็อตสูงสุด</span>
-          <span id="kpiActiveBranches" class="badge badge-slate">-</span>
-        </div>
-        <div id="kpiTopBranch" class="kpi-value">-</div>
-        <div id="kpiTopBranchSub" class="kpi-sub">-</div>
-      </article>
-
-      <article class="kpi-card amber" id="kpiAuditCard" style="cursor: pointer;" title="คลิกเพื่อดูรายการตรวจสอบสำหรับบัญชี">
-        <div class="kpi-label">
-          <span>ความสมบูรณ์ข้อมูล / รายการตรวจสอบ</span>
-          <span id="kpiAuditBadge" class="badge badge-amber">-</span>
-        </div>
-        <div id="kpiQualityPct" class="kpi-value num">-</div>
-        <div id="kpiAuditSub" class="kpi-sub">-</div>
-      </article>
-    </section>
-
-    <!-- Navigation Tabs -->
-    <nav class="tabs-bar" role="tablist">
-      <button class="tab-btn active" role="tab" data-tab="tab-ranking" aria-selected="true">
-        🏆 จัดอันดับ (Ranking)
-      </button>
-      <button class="tab-btn" role="tab" data-tab="tab-matrix" aria-selected="false">
-        📋 ตารางสรุปบัญชี (สาขา × รายวัน)
-      </button>
-      <button class="tab-btn" role="tab" data-tab="tab-overview" aria-selected="false">
-        📈 กราฟวิเคราะห์ (Chart.js)
-      </button>
-      <button class="tab-btn" role="tab" data-tab="tab-machines" aria-selected="false">
-        ⚙️ สถานะเครื่องและอายุหัว (10M)
-      </button>
-      <button class="tab-btn" role="tab" data-tab="tab-audit" aria-selected="false">
-        🔍 รายการตรวจสอบสำหรับบัญชี <span id="tabAuditCount" class="badge badge-amber">0</span>
-      </button>
-    </nav>
-
-    <!-- TAB 0 (PRIMARY): Ranking — Latest Head & Branch Ranking with Automatic Fallback -->
-    <section id="tab-ranking" class="tab-panel active">
-      <div class="ranking-toolbar">
-        <div class="control-group" style="min-width: 245px;">
-          <label for="rankingMetricSelect">จัดอันดับตาม</label>
-          <select id="rankingMetricSelect">
-            <option value="latest_counter">🔥 ช็อตสะสมหัวล่าสุด (ใกล้ครบ 10M สุด)</option>
-            <option value="latest_day_used">⚡ ช็อตที่ใช้ไปวันล่าสุด (Fallback วันล่าสุดที่มี)</option>
-            <option value="month_used">📅 ยอดใช้ช็อตรวมประจำเดือน</option>
-          </select>
-        </div>
-
-        <div class="control-group" style="min-width: 195px;">
-          <label>มุมมองการจัดอันดับ</label>
-          <div class="segmented" role="group" aria-label="มุมมอง Ranking">
-            <button type="button" id="rankViewBranchBtn" class="active" data-rank-view="branch">รายสาขา</button>
-            <button type="button" id="rankViewHeadBtn" data-rank-view="head">รายหัวทั้งหมด</button>
+      <!-- Live Google Sheets Status Card -->
+      <div class="sidebar-footer">
+        <div id="syncPill" class="sync-card sync-pill loading" title="สถานะการเชื่อมต่อ Google Sheets">
+          <div class="sync-card-top">
+            <span class="sync-dot"></span>
+            <span id="syncTitle">Google Sheets Sync</span>
           </div>
+          <div id="syncText" class="sync-card-sub">กำลังดึงข้อมูลล่าสุด...</div>
         </div>
-
-        <div class="control-group" style="min-width: 170px;">
-          <label for="rankingAsOfDate">อ้างอิง ณ วันที่</label>
-          <input id="rankingAsOfDate" type="date" />
-        </div>
-
-        <div class="control-spacer"></div>
-
-        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-          <span id="rankingFallbackSummary" class="badge badge-blue">-</span>
-          <button id="btnExportRanking" class="btn btn-outline" type="button">📥 ส่งออกตาราง Ranking (.csv)</button>
+        <div class="sidebar-footer-actions">
+          <button id="btnRefresh" class="btn btn-outline btn-sm" type="button" title="ดึงข้อมูลสดจาก Google Sheets ทันที">
+            <svg class="icon icon-sm" viewBox="0 0 24 24">
+              <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+              <path d="M3 3v5h5" />
+              <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16" />
+              <path d="M16 16h5v5" />
+            </svg>
+            รีเฟรช
+          </button>
+          <button id="btnSettings" class="btn btn-outline btn-sm" type="button" title="ตั้งค่าการเชื่อมต่อ Google Sheets">
+            <svg class="icon icon-sm" viewBox="0 0 24 24">
+              <circle cx="12" cy="12" r="3" />
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+            </svg>
+            ตั้งค่า
+          </button>
         </div>
       </div>
+    </aside>
 
-      <!-- Top 3 Podium -->
-      <div id="rankingPodium" class="podium-grid"></div>
-
-      <!-- Ranking Bar Chart -->
-      <div class="card">
-        <div class="card-header">
-          <div>
-            <h2 id="rankingChartTitle" class="card-title">กราฟจัดอันดับรายสาขา (หัวล่าสุด)</h2>
-            <p id="rankingChartSubtitle" class="card-subtitle">หากวันที่อ้างอิงไม่มีการส่งเข้ามา ระบบจะใช้ยอดจากวันล่าสุดก่อนหน้านั้นของสาขามาจัดอันดับให้อัตโนมัติ</p>
-          </div>
-          <div class="matrix-legend">
-            <span><span class="legend-dot" style="background: var(--rose);"></span>≥ 9.0M (เร่งเปลี่ยนหัว)</span>
-            <span><span class="legend-dot" style="background: var(--amber);"></span>8.0M–8.99M (เตรียมสำรอง)</span>
-            <span><span class="legend-dot" style="background: var(--brand);"></span>&lt; 8.0M (ปกติ)</span>
-          </div>
-        </div>
-        <div class="card-body">
-          <div id="rankingChartContainer" class="chart-wrap-tall">
-            <canvas id="rankingBarChart"></canvas>
-          </div>
-        </div>
-      </div>
-
-      <!-- Ranking Table -->
-      <div class="card">
-        <div class="card-header">
-          <div>
-            <h2 id="rankingTableTitle" class="card-title">ตารางจัดอันดับรายสาขา — ข้อมูลหัวที่ส่งเข้ามาล่าสุด</h2>
-            <p class="card-subtitle">แสดงวันที่ส่งจริงของแต่ละหัวชัดเจน หากวันนั้นไม่มียอดส่งเข้ามาจะขึ้นป้ายสีส้มระบุวันล่าสุดที่ใช้แทน</p>
-          </div>
-        </div>
-        <div class="table-scroll" style="max-height: 68vh;">
-          <table id="rankingTable" class="simple-table">
-            <thead></thead>
-            <tbody></tbody>
-          </table>
-        </div>
-      </div>
-    </section>
-
-    <!-- TAB 1: Accounting Matrix -->
-    <section id="tab-matrix" class="tab-panel">
-      <div class="card">
-        <div class="card-header">
-          <div>
-            <h2 id="matrixTitle" class="card-title">ตารางสรุปการใช้ช็อตรายวัน แยกตามสาขา</h2>
-            <p class="card-subtitle">คลิกที่ตัวเลขในแต่ละช่องเพื่อดูหลักฐานเลขมิเตอร์ก่อน-หลัง และรายละเอียดแยกทีละเครื่อง</p>
-          </div>
-          <div class="matrix-legend">
-            <span><span class="legend-dot" style="background: var(--amber);"></span>สะสมหลายวัน (ขาดส่งวันก่อน)</span>
-            <span><span class="legend-dot" style="background: var(--indigo);"></span>มีเปลี่ยนหัว Applicator</span>
-            <span><span class="legend-dot" style="background: #0ea5e9;"></span>เฉลี่ยวันขาดส่ง (Prorate)</span>
-          </div>
-        </div>
-        <div class="table-scroll">
-          <table id="matrixTable" class="acct-table">
-            <thead></thead>
-            <tbody></tbody>
-            <tfoot></tfoot>
-          </table>
-        </div>
-      </div>
-
-      <!-- Side-by-Side Head 1 / Head 2 Daily Meter Table (Zero Column Jumping!) -->
-      <div class="card">
-        <div class="card-header">
-          <div>
-            <h2 class="card-title">ตารางมิเตอร์แยกหัวรายวัน (หัว 1 / หัว 2 — จับคู่ตรงหัวอัตโนมัติไม่กระโดดข้ามช่อง)</h2>
-            <p class="card-subtitle">เปรียบเทียบเลขมิเตอร์แต่ละหัวรายวัน แก้ปัญหาส่งก่อน-ส่งหลัง หรือ OCR ขึ้น 0/ESC แล้วเลขสลับคอลัมน์ใน Sheet2</p>
-          </div>
-          <div style="display:flex;align-items:center;gap:8px;">
-            <label for="headCompareBranchSelect" style="font-size:13px;font-weight:600;color:var(--text-secondary);">เลือกสาขา:</label>
-            <select id="headCompareBranchSelect" style="height:36px;padding:0 12px;border-radius:8px;border:1px solid var(--border-strong);font-family:inherit;font-size:13.5px;"></select>
-          </div>
-        </div>
-        <div class="table-scroll" style="max-height: 480px;">
-          <table id="headCompareTable" class="simple-table">
-            <thead></thead>
-            <tbody></tbody>
-            <tfoot></tfoot>
-          </table>
-        </div>
-      </div>
-
-      <!-- Quick Branch Summary Table below matrix -->
-      <div class="card">
-        <div class="card-header">
-          <div>
-            <h2 class="card-title">สรุปยอดรวมและสัดส่วนแต่ละสาขา</h2>
-            <p class="card-subtitle">จัดอันดับจากยอดใช้ช็อตสูงสุดไปต่ำสุด เพื่อการลงบัญชีและเปรียบเทียบสาขา</p>
-          </div>
-        </div>
-        <div class="table-scroll" style="max-height: 440px;">
-          <table id="branchSummaryTable" class="simple-table">
-            <thead>
-              <tr>
-                <th>อันดับ</th>
-                <th>สาขา</th>
-                <th class="right">จำนวนเครื่อง</th>
-                <th class="right">วันที่มีข้อมูล</th>
-                <th class="right">ยอดช็อตรวม</th>
-                <th class="right">เฉลี่ย/วัน</th>
-                <th class="right">สูงสุด/วัน</th>
-                <th class="right">สัดส่วน (%)</th>
-                <th class="right col-cost-header" style="display:none;">ประมาณการต้นทุน (บาท)</th>
-              </tr>
-            </thead>
-            <tbody></tbody>
-          </table>
-        </div>
-      </div>
-    </section>
-
-    <!-- TAB 2: Charts (Chart.js) -->
-    <section id="tab-overview" class="tab-panel">
-      <div class="chart-grid-asymmetric">
-        <div class="card">
-          <div class="card-header">
-            <div>
-              <h2 id="dailyChartTitle" class="card-title">แนวโน้มการใช้ช็อตรายวัน</h2>
-              <p class="card-subtitle">ยอดช็อตที่ใช้จริงในแต่ละวันของช่วงเวลาที่เลือก</p>
-            </div>
-          </div>
-          <div class="card-body">
-            <div class="chart-wrap">
-              <canvas id="dailyTrendChart"></canvas>
-            </div>
+    <!-- Main Workspace Shell -->
+    <div class="main-shell">
+      <!-- Clean Sticky Header -->
+      <header class="header-bar">
+        <div class="header-left">
+          <button id="btnMobileMenu" class="mobile-menu-btn" type="button" aria-label="เปิดเมนู">
+            <svg class="icon" viewBox="0 0 24 24">
+              <line x1="4" x2="20" y1="12" y2="12" />
+              <line x1="4" x2="20" y1="6" y2="6" />
+              <line x1="4" x2="20" y1="18" y2="18" />
+            </svg>
+          </button>
+          <div class="page-heading">
+            <h1 id="pageTitle" class="page-title">จัดอันดับหัวล่าสุดและรายสาขา</h1>
+            <p id="pageSubtitle" class="page-subtitle">อ้างอิงหัวที่ส่งเข้ามาล่าสุด หากวันนั้นขาดส่งระบบจะดึงวันล่าสุดที่มีมาจัดอันดับแทนอัตโนมัติ</p>
           </div>
         </div>
 
-        <div class="card">
-          <div class="card-header">
-            <div>
-              <h2 class="card-title">สัดส่วนการใช้ช็อต (Top 8 สาขา + อื่นๆ)</h2>
-              <p class="card-subtitle">คลิกที่แท่งกราฟสาขาเพื่อกรองดูรายสาขา</p>
-            </div>
-          </div>
-          <div class="card-body">
-            <div class="chart-wrap">
-              <canvas id="branchShareChart"></canvas>
-            </div>
-          </div>
+        <div class="header-actions">
+          <button id="btnExportDetail" class="btn btn-outline" type="button" title="ส่งออกรายการคำนวณรายเครื่องพร้อมมิเตอร์ก่อน-หลัง">
+            <svg class="icon icon-sm" viewBox="0 0 24 24">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+              <polyline points="14 2 14 8 20 8" />
+              <line x1="16" x2="8" y1="13" y2="13" />
+              <line x1="16" x2="8" y1="17" y2="17" />
+            </svg>
+            <span class="btn-label-hide-sm">บัญชีรายเครื่อง</span>
+          </button>
+          <button id="btnExportMatrix" class="btn btn-primary" type="button" title="ส่งออกตารางรายสาขา × รายวัน เป็นไฟล์ CSV สำหรับ Excel">
+            <svg class="icon icon-sm" viewBox="0 0 24 24">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="7 10 12 15 17 10" />
+              <line x1="12" x2="12" y1="15" y2="3" />
+            </svg>
+            <span class="btn-label-hide-sm">ส่งออก Excel</span>
+          </button>
+          <button id="btnPrint" class="btn btn-outline" type="button" title="พิมพ์รายงาน">
+            <svg class="icon icon-sm" viewBox="0 0 24 24">
+              <polyline points="6 9 6 2 18 2 18 9" />
+              <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" />
+              <rect width="12" height="8" x="6" y="14" />
+            </svg>
+          </button>
         </div>
-      </div>
+      </header>
 
-      <div class="chart-grid-2">
-        <div class="card">
-          <div class="card-header">
-            <div>
-              <h2 class="card-title">เปรียบเทียบยอดใช้ช็อตรวมทุกสาขา (มาก → น้อย)</h2>
-              <p class="card-subtitle">คลิกที่ชื่อ/แท่งสาขาเพื่อสลับไปดูข้อมูลเฉพาะสาขานั้น</p>
-            </div>
+      <main class="workspace">
+        <!-- Offline Snapshot Notice -->
+        <div id="snapshotBanner" class="banner" role="alert">
+          <div class="banner-text">
+            <strong>กำลังแสดงข้อมูล Snapshot ในเครื่อง</strong> —
+            ระบบไม่สามารถดึงข้อมูลสดจาก Google Sheet ได้ในขณะนี้ (อาจเป็นแบบส่วนตัวหรือออฟไลน์)
           </div>
-          <div class="card-body">
-            <div class="chart-wrap-tall">
-              <canvas id="branchBarChart"></canvas>
-            </div>
-          </div>
+          <button id="btnOpenSetupFromBanner" class="btn btn-outline btn-sm" type="button">ตั้งค่าการเชื่อมต่อ</button>
         </div>
 
-        <div class="card">
-          <div class="card-header">
-            <div>
-              <h2 class="card-title">ภาพรวมยอดใช้ช็อตรายเดือนทั้งปี</h2>
-              <p class="card-subtitle">เปรียบเทียบปริมาณการใช้ช็อตแต่ละเดือน (คลิกเดือนเพื่อสลับดูเดือนนั้น)</p>
-            </div>
-          </div>
-          <div class="card-body">
-            <div class="chart-wrap-tall">
-              <canvas id="monthlyTrendChart"></canvas>
-            </div>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- TAB 3: Machine Health & Head Lifespan -->
-    <section id="tab-machines" class="tab-panel">
-      <div class="card">
-        <div class="card-header">
-          <div>
-            <h2 class="card-title">สถานะเครื่อง Applicator และช็อตคงเหลือ (อายุหัว 10,000,000 ช็อต)</h2>
-            <p class="card-subtitle">ติดตามจำนวนเครื่องต่อสาขา เลขมิเตอร์ล่าสุด และแจ้งเตือนหัวที่ใกล้ครบ 10 ล้านช็อต</p>
-          </div>
-          <div id="machineSummaryBadges" class="matrix-legend"></div>
-        </div>
-        <div class="card-body">
-          <div id="machineGrid" class="machine-grid"></div>
-        </div>
-      </div>
-    </section>
-
-    <!-- TAB 4: Audit & Anomaly Log -->
-    <section id="tab-audit" class="tab-panel">
-      <div class="card">
-        <div class="card-header">
-          <div>
-            <h2 class="card-title">รายการตรวจสอบความถูกต้องสำหรับฝ่ายบัญชี (Audit Trail)</h2>
-            <p class="card-subtitle">แสดงรายการที่ OCR อ่านพลาด ค่าเกิน 10 ล้าน ค่ากระโดด การเปลี่ยนหัวใหม่ และวันที่ขาดส่ง เพื่อให้ตรวจสอบย้อนกลับได้ 100%</p>
-          </div>
-        </div>
-        <div class="card-body">
-          <div class="audit-toolbar">
-            <select id="auditTypeFilter" style="height:36px;padding:0 10px;border-radius:8px;border:1px solid var(--border-strong);font-family:inherit;">
-              <option value="ALL">ทุกประเภท</option>
-              <option value="ERROR_ONLY">เฉพาะ OCR พลาด / ค่าผิดปกติ (ถูกตัดออก)</option>
-              <option value="HEAD_SWAP">เฉพาะการเปลี่ยนหัว / สลับหัว</option>
-              <option value="MULTI_DAY">เฉพาะวันที่เว้นช่วง/สะสมหลายวัน</option>
+        <!-- Global Filter Strip -->
+        <section class="control-bar" aria-label="ตัวกรองข้อมูลบัญชี">
+          <div class="control-group" style="min-width: 210px;">
+            <label for="scopeSelect">โครงสร้างสาขา / เครื่อง</label>
+            <select id="scopeSelect">
+              <option value="sheet2">อิงตาม Sheet2 เป็นหลัก</option>
+              <option value="all">รวมสาขาอื่นใน Sheet1 (สูงสุด 2 เครื่อง)</option>
             </select>
-            <input id="auditSearchInput" type="text" placeholder="ค้นหาสาขา / เลขเครื่อง / วันที่..." style="height:36px;padding:0 12px;border-radius:8px;border:1px solid var(--border-strong);font-family:inherit;min-width:240px;" />
-            <span id="auditCountLabel" style="font-size:13px;color:var(--text-muted);"></span>
           </div>
 
-          <div class="table-scroll" style="max-height: 60vh;">
-            <table id="auditTable" class="simple-table">
-              <thead>
-                <tr>
-                  <th>วันที่</th>
-                  <th>สาขา</th>
-                  <th>ประเภท</th>
-                  <th>หมายเลขเครื่อง</th>
-                  <th class="right">ค่าดิบจาก Sheet</th>
-                  <th class="right">มิเตอร์ก่อนหน้า</th>
-                  <th>หมายเหตุ / การจัดการของระบบ</th>
-                </tr>
-              </thead>
-              <tbody></tbody>
-            </table>
+          <div class="control-group">
+            <label for="monthSelect">เดือนบัญชี</label>
+            <select id="monthSelect"></select>
           </div>
-        </div>
-      </div>
-    </section>
-  </main>
+
+          <div class="control-group">
+            <label for="branchSelect">สาขา</label>
+            <select id="branchSelect"></select>
+          </div>
+
+          <div class="control-group" style="min-width: auto;">
+            <label>การจัดการวันขาดส่ง</label>
+            <div class="segmented" role="group" aria-label="โหมดคำนวณวันขาดส่ง">
+              <button type="button" id="modeActualBtn" class="active" data-mode="actual">ตามวันที่บันทึกจริง</button>
+              <button type="button" id="modeProrateBtn" data-mode="prorate">เฉลี่ยวันขาดส่ง</button>
+            </div>
+          </div>
+
+          <div class="control-spacer"></div>
+
+          <div class="control-group" style="min-width: 135px; max-width: 155px;">
+            <label for="costPerShotInput">ต้นทุน/ช็อต (บาท)</label>
+            <input id="costPerShotInput" type="number" step="0.001" min="0" placeholder="0.00" />
+          </div>
+        </section>
+
+        <!-- Unified Executive KPI Strip (Stripe / Mercury style) -->
+        <section class="kpi-strip" aria-label="สรุปตัวเลขสำคัญ">
+          <article class="kpi-cell">
+            <div class="kpi-label">
+              <span>ยอดใช้ช็อตรวม</span>
+              <span id="kpiPeriodBadge" class="badge badge-slate">-</span>
+            </div>
+            <div id="kpiTotalShots" class="kpi-value num">-</div>
+            <div id="kpiTotalSub" class="kpi-sub">-</div>
+          </article>
+
+          <article class="kpi-cell">
+            <div class="kpi-label">
+              <span>เฉลี่ยต่อวัน</span>
+              <span class="badge badge-slate">รายวัน</span>
+            </div>
+            <div id="kpiAvgDaily" class="kpi-value num">-</div>
+            <div id="kpiPeakDaySub" class="kpi-sub">-</div>
+          </article>
+
+          <article class="kpi-cell">
+            <div class="kpi-label">
+              <span>สาขาใช้งานสูงสุด</span>
+              <span id="kpiActiveBranches" class="badge badge-slate">-</span>
+            </div>
+            <div id="kpiTopBranch" class="kpi-value">-</div>
+            <div id="kpiTopBranchSub" class="kpi-sub">-</div>
+          </article>
+
+          <article class="kpi-cell clickable" id="kpiAuditCard" title="คลิกเพื่อดูรายการตรวจสอบสำหรับบัญชี">
+            <div class="kpi-label">
+              <span>ความสมบูรณ์ข้อมูล</span>
+              <span id="kpiAuditBadge" class="badge badge-amber">-</span>
+            </div>
+            <div id="kpiQualityPct" class="kpi-value num">-</div>
+            <div id="kpiAuditSub" class="kpi-sub">-</div>
+          </article>
+        </section>
+
+        <!-- TAB 0 (PRIMARY): Ranking -->
+        <section id="tab-ranking" class="tab-panel active">
+          <div class="ranking-toolbar">
+            <div class="control-group" style="min-width: 240px;">
+              <label for="rankingMetricSelect">เกณฑ์การจัดอันดับ</label>
+              <select id="rankingMetricSelect">
+                <option value="latest_counter">ช็อตสะสมหัวล่าสุด (ใกล้ครบ 10M ที่สุด)</option>
+                <option value="latest_day_used">ช็อตที่ใช้ไปวันล่าสุด (Fallback วันล่าสุดที่มี)</option>
+                <option value="month_used">ยอดใช้ช็อตรวมประจำเดือน</option>
+              </select>
+            </div>
+
+            <div class="control-group" style="min-width: auto;">
+              <label>มุมมอง</label>
+              <div class="segmented" role="group" aria-label="มุมมอง Ranking">
+                <button type="button" id="rankViewBranchBtn" class="active" data-rank-view="branch">รายสาขา</button>
+                <button type="button" id="rankViewHeadBtn" data-rank-view="head">รายหัวทั้งหมด</button>
+              </div>
+            </div>
+
+            <div class="control-group" style="min-width: 155px;">
+              <label for="rankingAsOfDate">อ้างอิง ณ วันที่</label>
+              <input id="rankingAsOfDate" type="date" />
+            </div>
+
+            <div class="control-spacer"></div>
+
+            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+              <span id="rankingFallbackSummary" class="badge badge-slate">-</span>
+              <button id="btnExportRanking" class="btn btn-outline" type="button">
+                <svg class="icon icon-sm" viewBox="0 0 24 24">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                  <polyline points="7 10 12 15 17 10" />
+                  <line x1="12" x2="12" y1="15" y2="3" />
+                </svg>
+                ส่งออก Ranking
+              </button>
+            </div>
+          </div>
+
+          <!-- Top 3 Spotlight Cards -->
+          <div id="rankingPodium" class="podium-grid"></div>
+
+          <!-- Ranking Chart -->
+          <div class="card">
+            <div class="card-header">
+              <div>
+                <h2 id="rankingChartTitle" class="card-title">กราฟจัดอันดับรายสาขา (หัวล่าสุด)</h2>
+                <p id="rankingChartSubtitle" class="card-subtitle">กรณีวันที่อ้างอิงไม่มีการส่งเข้ามา ระบบจะใช้ยอดจากวันล่าสุดก่อนหน้านั้นมาจัดอันดับแทนโดยอัตโนมัติ</p>
+              </div>
+              <div class="matrix-legend">
+                <span><span class="legend-dot" style="background: var(--rose);"></span>≥ 9.0M เร่งเปลี่ยนหัว</span>
+                <span><span class="legend-dot" style="background: var(--amber);"></span>8.0M–8.99M เตรียมสำรอง</span>
+                <span><span class="legend-dot" style="background: var(--accent);"></span>&lt; 8.0M ปกติ</span>
+              </div>
+            </div>
+            <div class="card-body">
+              <div id="rankingChartContainer" class="chart-wrap-tall">
+                <canvas id="rankingBarChart"></canvas>
+              </div>
+            </div>
+          </div>
+
+          <!-- Full Ranking Table -->
+          <div class="card">
+            <div class="card-header">
+              <div>
+                <h2 id="rankingTableTitle" class="card-title">ตารางจัดอันดับรายสาขา</h2>
+                <p class="card-subtitle">แสดงวันที่ส่งจริงของแต่ละหัวอย่างชัดเจน หากวันนั้นไม่มีการส่งจะขึ้นป้ายระบุวันล่าสุดที่ใช้แทน</p>
+              </div>
+            </div>
+            <div class="table-scroll" style="max-height: 68vh;">
+              <table id="rankingTable" class="simple-table">
+                <thead></thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <!-- TAB 1: Accounting Matrix & Side-by-Side Head Compare -->
+        <section id="tab-matrix" class="tab-panel">
+          <div class="card">
+            <div class="card-header">
+              <div>
+                <h2 id="matrixTitle" class="card-title">ตารางสรุปการใช้ช็อตรายวัน แยกตามสาขา</h2>
+                <p class="card-subtitle">คลิกที่ตัวเลขในแต่ละช่องเพื่อดูหลักฐานมิเตอร์ก่อน-หลังและรายละเอียดแยกทีละเครื่อง</p>
+              </div>
+              <div class="matrix-legend">
+                <span><span class="legend-dot" style="background: var(--amber);"></span>สะสมหลายวัน</span>
+                <span><span class="legend-dot" style="background: var(--accent);"></span>เปลี่ยนหัว Applicator</span>
+                <span><span class="legend-dot" style="background: #0ea5e9;"></span>เฉลี่ยวันขาดส่ง</span>
+              </div>
+            </div>
+            <div class="table-scroll">
+              <table id="matrixTable" class="acct-table">
+                <thead></thead>
+                <tbody></tbody>
+                <tfoot></tfoot>
+              </table>
+            </div>
+          </div>
+
+          <!-- Side-by-Side Head 1 / Head 2 Daily Meter Table -->
+          <div class="card">
+            <div class="card-header">
+              <div>
+                <h2 class="card-title">ตารางมิเตอร์แยกหัวรายวัน (หัว 1 / หัว 2)</h2>
+                <p class="card-subtitle">จับคู่เลขมิเตอร์ตรงหัวอัตโนมัติ ไม่สลับคอลัมน์เมื่อส่งสลับลำดับหรือเกิดค่า OCR ผิดพลาด</p>
+              </div>
+              <div style="display:flex;align-items:center;gap:8px;">
+                <label for="headCompareBranchSelect" style="font-size:12.5px;font-weight:500;color:var(--ink-secondary);">สาขา:</label>
+                <select id="headCompareBranchSelect" style="height:34px;padding:0 10px;border-radius:6px;border:1px solid var(--border-strong);font-family:inherit;font-size:13px;"></select>
+              </div>
+            </div>
+            <div class="table-scroll" style="max-height: 480px;">
+              <table id="headCompareTable" class="simple-table">
+                <thead></thead>
+                <tbody></tbody>
+                <tfoot></tfoot>
+              </table>
+            </div>
+          </div>
+
+          <!-- Branch Summary Table -->
+          <div class="card">
+            <div class="card-header">
+              <div>
+                <h2 class="card-title">สรุปยอดรวมและสัดส่วนแต่ละสาขา</h2>
+                <p class="card-subtitle">จัดเรียงจากยอดใช้งานสูงสุดไปต่ำสุด คลิกแถวเพื่อกรองดูข้อมูลเฉพาะสาขา</p>
+              </div>
+            </div>
+            <div class="table-scroll" style="max-height: 440px;">
+              <table id="branchSummaryTable" class="simple-table">
+                <thead>
+                  <tr>
+                    <th>อันดับ</th>
+                    <th>สาขา</th>
+                    <th class="right">จำนวนเครื่อง</th>
+                    <th class="right">วันที่มีข้อมูล</th>
+                    <th class="right">ยอดช็อตรวม</th>
+                    <th class="right">เฉลี่ย/วัน</th>
+                    <th class="right">สูงสุด/วัน</th>
+                    <th class="right">สัดส่วน</th>
+                    <th class="right col-cost-header" style="display:none;">ประมาณการต้นทุน (บาท)</th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <!-- TAB 2: Charts (Chart.js) -->
+        <section id="tab-overview" class="tab-panel">
+          <div class="chart-grid-asymmetric">
+            <div class="card">
+              <div class="card-header">
+                <div>
+                  <h2 id="dailyChartTitle" class="card-title">แนวโน้มการใช้ช็อตรายวัน</h2>
+                  <p class="card-subtitle">ปริมาณช็อตที่ใช้จริงในแต่ละวันเทียบค่าเฉลี่ยประจำเดือน</p>
+                </div>
+              </div>
+              <div class="card-body">
+                <div class="chart-wrap">
+                  <canvas id="dailyTrendChart"></canvas>
+                </div>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="card-header">
+                <div>
+                  <h2 class="card-title">สัดส่วนการใช้งานตามสาขา</h2>
+                  <p class="card-subtitle">8 อันดับแรกเทียบกับสาขาอื่นๆ ทั้งหมด</p>
+                </div>
+              </div>
+              <div class="card-body">
+                <div class="chart-wrap">
+                  <canvas id="branchShareChart"></canvas>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="chart-grid-2">
+            <div class="card">
+              <div class="card-header">
+                <div>
+                  <h2 class="card-title">เปรียบเทียบยอดใช้ช็อตรวมทุกสาขา</h2>
+                  <p class="card-subtitle">คลิกที่แท่งสาขาเพื่อกรองข้อมูลเฉพาะสาขานั้น</p>
+                </div>
+              </div>
+              <div class="card-body">
+                <div class="chart-wrap-tall">
+                  <canvas id="branchBarChart"></canvas>
+                </div>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="card-header">
+                <div>
+                  <h2 class="card-title">ภาพรวมยอดใช้ช็อตรายเดือนทั้งปี</h2>
+                  <p class="card-subtitle">คลิกที่แท่งเดือนเพื่อสลับช่วงบัญชีทันที</p>
+                </div>
+              </div>
+              <div class="card-body">
+                <div class="chart-wrap-tall">
+                  <canvas id="monthlyTrendChart"></canvas>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- TAB 3: Machine Health & Head Lifespan -->
+        <section id="tab-machines" class="tab-panel">
+          <div class="card">
+            <div class="card-header">
+              <div>
+                <h2 class="card-title">สถานะเครื่องและช็อตคงเหลือ (อายุหัว 10,000,000 ช็อต)</h2>
+                <p class="card-subtitle">ตรวจสอบมิเตอร์ล่าสุด ปริมาณคงเหลือ และประวัติการเปลี่ยนหัวของทุกสาขา</p>
+              </div>
+              <div id="machineSummaryBadges" class="matrix-legend"></div>
+            </div>
+            <div class="card-body">
+              <div id="machineGrid" class="machine-grid"></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- TAB 4: Audit & Anomaly Log -->
+        <section id="tab-audit" class="tab-panel">
+          <div class="card">
+            <div class="card-header">
+              <div>
+                <h2 class="card-title">บันทึกการตรวจสอบข้อมูลสำหรับบัญชี (Audit Trail)</h2>
+                <p class="card-subtitle">รายการค่า OCR ผิดพลาด ค่าเกิน 10 ล้าน การเปลี่ยนหัว และวันขาดส่ง เพื่อให้ตรวจสอบย้อนกลับได้ครบถ้วน</p>
+              </div>
+            </div>
+            <div class="card-body">
+              <div class="audit-toolbar">
+                <select id="auditTypeFilter">
+                  <option value="ALL">ทุกประเภท</option>
+                  <option value="ERROR_ONLY">เฉพาะ OCR พลาด / ค่าผิดปกติ</option>
+                  <option value="HEAD_SWAP">เฉพาะการเปลี่ยนหัว / สลับหัว</option>
+                  <option value="MULTI_DAY">เฉพาะวันที่เว้นช่วง/สะสมหลายวัน</option>
+                </select>
+                <input id="auditSearchInput" type="text" placeholder="ค้นหาสาขา / เลขเครื่อง / วันที่..." style="min-width:240px;" />
+                <span id="auditCountLabel" style="font-size:12.5px;color:var(--ink-tertiary);"></span>
+              </div>
+
+              <div class="table-scroll" style="max-height: 60vh;">
+                <table id="auditTable" class="simple-table">
+                  <thead>
+                    <tr>
+                      <th>วันที่</th>
+                      <th>สาขา</th>
+                      <th>ประเภท</th>
+                      <th>หมายเลขเครื่อง</th>
+                      <th class="right">ค่าดิบจาก Sheet</th>
+                      <th class="right">มิเตอร์ก่อนหน้า</th>
+                      <th>หมายเหตุ / การจัดการของระบบ</th>
+                    </tr>
+                  </thead>
+                  <tbody></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
 
   <!-- Modal 1: Cell Accounting Drill-Down -->
   <div id="drillModal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="drillModalTitle">
@@ -445,56 +551,54 @@
   <div id="settingsModal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="settingsModalTitle">
     <div class="modal-dialog">
       <div class="modal-header">
-        <h3 id="settingsModalTitle" class="modal-title">⚙️ ตั้งค่าการเชื่อมต่อ Google Sheets อัตโนมัติ</h3>
+        <h3 id="settingsModalTitle" class="modal-title">ตั้งค่าการเชื่อมต่อ Google Sheets</h3>
         <button class="modal-close" type="button" data-close-modal="settingsModal" aria-label="ปิด">&times;</button>
       </div>
       <div class="modal-body">
         <div class="callout-box">
-          <strong>เลือกวิธีเชื่อมต่อแบบดึงข้อมูลสดอัตโนมัติ (เลือก 1 ใน 2 วิธี):</strong>
+          <strong>วิธีการเชื่อมต่อข้อมูลสดอัตโนมัติ (เลือก 1 วิธี):</strong>
           <ol>
-            <li><strong>วิธีที่ง่ายที่สุด (ไม่ต้องเขียนโค้ด):</strong> เปิด Google Sheet ของคุณ → กดปุ่ม <strong>แชร์ (Share)</strong> → เปลี่ยนเป็น <em>"ทุกคนที่มีลิงก์ (Anyone with the link)"</em> สิทธิ์ <em>"ผู้มีสิทธิ์อ่าน (Viewer)"</em> → กดบันทึก แล้วคลิก "ดึงข้อมูลล่าสุด" ได้เลย</li>
-            <li><strong>กรณีต้องการเก็บ Sheet เป็น Private:</strong> นำโค้ดในไฟล์ <code>apps-script/Code.gs</code> ไปวางใน Google Sheets → Extensions → Apps Script → Deploy เป็น Web App แล้วนำ URL มาวางในช่องด้านล่าง</li>
+            <li><strong>แชร์แบบอ่านอย่างเดียว (แนะนำ):</strong> เปิด Google Sheet → แชร์ (Share) → เลือก <em>"ทุกคนที่มีลิงก์ (Viewer)"</em> ระบบจะดึงข้อมูลสดทั้ง Sheet1 และโครงสร้าง Sheet2 อัตโนมัติ</li>
+            <li><strong>เก็บ Sheet เป็น Private:</strong> นำโค้ดในไฟล์ <code>apps-script/Code.gs</code> ไป Deploy เป็น Web App แล้ววาง URL ในช่องด้านล่าง</li>
           </ol>
         </div>
 
         <div class="form-field">
           <label for="cfgSpreadsheetId">Google Spreadsheet ID</label>
           <input id="cfgSpreadsheetId" type="text" />
-          <div class="form-hint">รหัสระหว่าง <code>/d/</code> และ <code>/edit</code> ในลิงก์ Google Sheet</div>
+          <div class="form-hint">รหัสระหว่าง <code>/d/</code> และ <code>/edit</code> ใน URL ของ Google Sheet</div>
         </div>
 
         <div class="form-field">
           <label for="cfgSheetName">ชื่อแท็บข้อมูลดิบ (Sheet Name)</label>
           <input id="cfgSheetName" type="text" />
-          <div class="form-hint">แนะนำ <code>Sheet1</code> เพราะเก็บครบทั้ง 19 สาขา พร้อมวันที่และหมายเลขเครื่อง</div>
         </div>
 
         <div class="form-field">
-          <label for="cfgAppsScriptUrl">Google Apps Script Web App URL (ทางเลือกสำหรับ Sheet ส่วนตัว)</label>
+          <label for="cfgAppsScriptUrl">Google Apps Script Web App URL (กรณี Private Sheet)</label>
           <input id="cfgAppsScriptUrl" type="text" placeholder="https://script.google.com/macros/s/.../exec" />
-          <div class="form-hint">เว้นว่างไว้หากใช้วิธีแชร์ Google Sheet แบบผู้ที่มีลิงก์ดูได้</div>
         </div>
 
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
           <div class="form-field">
-            <label for="cfgRefreshMinutes">ดึงข้อมูลอัตโนมัติทุก (นาที)</label>
+            <label for="cfgRefreshMinutes">รีเฟรชอัตโนมัติทุก (นาที)</label>
             <input id="cfgRefreshMinutes" type="number" min="1" max="120" value="5" />
           </div>
           <div class="form-field">
             <label for="cfgMaxPerDay">เพดานช็อตสูงสุด/เครื่อง/วัน</label>
-            <input id="cfgMaxPerDay" type="number" min="50000" max="1000000" step="10000" value="250000" />
+            <input id="cfgMaxPerDay" type="number" min="50000" max="1000000" step="10000" value="200000" />
           </div>
         </div>
       </div>
       <div class="modal-footer">
         <button id="btnResetSettings" class="btn btn-outline" type="button">คืนค่าเริ่มต้น</button>
         <button class="btn btn-outline" type="button" data-close-modal="settingsModal">ยกเลิก</button>
-        <button id="btnSaveSettings" class="btn btn-primary" type="button">บันทึกและดึงข้อมูลใหม่</button>
+        <button id="btnSaveSettings" class="btn btn-primary" type="button">บันทึกและรีเฟรช</button>
       </div>
     </div>
   </div>
 
-  <!-- Embedded CORS-free Snapshot (instant load & offline fallback) -->
+  <!-- Embedded CORS-free Snapshot -->
   <script src="data/snapshot.js"></script>
   <!-- Dashboard Core Modules -->
   <script src="js/config.js"></script>
