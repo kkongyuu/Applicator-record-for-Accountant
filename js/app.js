@@ -22,7 +22,12 @@
     costPerShot: 0,
     auditType: 'ALL',
     auditSearch: '',
+    rankingMetric: 'latest_counter', // 'latest_counter' | 'latest_day_used' | 'month_used'
+    rankingView: 'branch',           // 'branch' | 'head'
+    rankingAsOfDate: '',             // 'YYYY-MM-DD'
+    lastRankingRows: [],
     charts: {
+      ranking: null,
       daily: null,
       branchBar: null,
       branchShare: null,
@@ -180,6 +185,17 @@
     state.selectedBranch = (prevBranch === 'ALL' || branches.includes(prevBranch)) ? prevBranch : 'ALL';
     branchSelect.value = state.selectedBranch;
 
+    // Default ranking As-Of Date to the latest date in dataset
+    const asOfInput = document.getElementById('rankingAsOfDate');
+    if (asOfInput) {
+      asOfInput.min = state.processed.minDateKey || '';
+      asOfInput.max = state.processed.maxDateKey || '';
+      if (!state.rankingAsOfDate || state.rankingAsOfDate > state.processed.maxDateKey || state.rankingAsOfDate < state.processed.minDateKey) {
+        state.rankingAsOfDate = state.processed.maxDateKey || '';
+      }
+      asOfInput.value = state.rankingAsOfDate;
+    }
+
     // Populate Head 1 / Head 2 side-by-side branch comparison selector
     const headSel = document.getElementById('headCompareBranchSelect');
     if (headSel) {
@@ -245,12 +261,461 @@
     const audits = getActiveAudits();
 
     renderKPIs(events, audits);
+    renderRanking();
     renderMatrix(events);
     renderHeadCompareTable();
     renderBranchSummaryTable(events);
     renderCharts(events);
     renderMachines();
     renderAudits(audits);
+  }
+
+  // ---------- TAB 0: Ranking (Latest Head / Branch with Automatic Fallback) ----------
+  function parseIsoToUtcMs(dateKey) {
+    if (!dateKey) return 0;
+    const [y, m, d] = dateKey.split('-').map(Number);
+    return Date.UTC(y, m - 1, d);
+  }
+
+  function computeRankingData() {
+    const asOf = state.rankingAsOfDate || state.processed.maxDateKey;
+    const asOfMs = parseIsoToUtcMs(asOf);
+    const maxLifespan = state.settings.maxHeadLifespan || 10000000;
+    const branches = state.selectedBranch === 'ALL'
+      ? state.processed.branches
+      : [state.selectedBranch];
+
+    // Pre-index events by branch+trackId (already chronological in dailyEvents)
+    const eventsByTrack = new Map();
+    const monthTotalsByBranch = new Map();
+    const monthTotalsByTrack = new Map();
+    const expandedForMonth = window.ShotEngine.expandEventsByMode(state.processed.dailyEvents, state.gapMode);
+
+    for (const ev of expandedForMonth) {
+      if (state.selectedMonth === 'ALL' || ev.monthKey === state.selectedMonth) {
+        monthTotalsByBranch.set(ev.branch, (monthTotalsByBranch.get(ev.branch) || 0) + ev.shotsUsed);
+        monthTotalsByTrack.set(ev.trackId, (monthTotalsByTrack.get(ev.trackId) || 0) + ev.shotsUsed);
+      }
+    }
+
+    for (const ev of state.processed.dailyEvents) {
+      if (asOf && ev.dateKey > asOf) continue;
+      if (!eventsByTrack.has(ev.trackId)) eventsByTrack.set(ev.trackId, []);
+      eventsByTrack.get(ev.trackId).push(ev);
+    }
+
+    const branchRows = [];
+    const headRows = [];
+
+    for (const b of branches) {
+      const meta = state.processed.branchMeta[b];
+      if (!meta) continue;
+
+      const heads = [];
+      for (const t of meta.tracks) {
+        const list = eventsByTrack.get(t.id) || [];
+        if (!list.length) continue;
+
+        const latestEv = list[list.length - 1];
+        const staleDays = asOfMs && latestEv.utcMs ? Math.max(0, Math.round((asOfMs - latestEv.utcMs) / 86400000)) : 0;
+
+        // Calculate recent daily avg (last 14 active readings) to estimate days left until 10M
+        const recent = list.slice(-14).filter(e => e.shotsUsed > 0 && e.status !== 'BASELINE');
+        const recentShots = recent.reduce((s, e) => s + e.shotsUsed, 0);
+        const recentDays = recent.reduce((s, e) => s + Math.max(1, e.dayGap || 1), 0);
+        const avgPerDay = recentDays > 0 ? recentShots / recentDays : 0;
+
+        const curVal = latestEv.curVal;
+        const remaining = Math.max(0, maxLifespan - curVal);
+        const usedPct = Math.min(100, (curVal / maxLifespan) * 100);
+        const estDaysLeft = avgPerDay > 0 ? Math.ceil(remaining / avgPerDay) : null;
+
+        // For latest day shots used, if latest reading had 0 (e.g. head swap/baseline), still show latestEv.shotsUsed
+        const latestDayShots = latestEv.shotsUsed;
+        const headObj = {
+          branch: b,
+          trackId: t.id,
+          headNum: t.num,
+          headLabel: t.label,
+          displayLabel: `${b} — หัว ${t.num}${t.label && !t.label.startsWith('เครื่อง') ? ' (' + t.label + ')' : ''}`,
+          latestDateKey: latestEv.dateKey,
+          latestThaiDate: latestEv.thaiDate,
+          staleDays,
+          curVal,
+          remaining,
+          usedPct,
+          latestDayShots,
+          latestDayGap: latestEv.dayGap || 1,
+          avgPerDay,
+          estDaysLeft,
+          monthShots: monthTotalsByTrack.get(t.id) || 0,
+          status: latestEv.status
+        };
+        heads.push(headObj);
+        headRows.push(headObj);
+      }
+
+      if (!heads.length) continue;
+
+      // Peak head = head with highest latest counter (closest to 10M)
+      const peakHead = heads.reduce((best, h) => (!best || h.curVal > best.curVal ? h : best), null);
+      const latestDayTotal = heads.reduce((s, h) => s + h.latestDayShots, 0);
+      const minStale = Math.min(...heads.map(h => h.staleDays));
+      const maxStale = Math.max(...heads.map(h => h.staleDays));
+      const anyFallback = heads.some(h => h.staleDays > 0);
+      const latestDateOverall = heads.reduce((best, h) => (!best || h.latestDateKey > best.latestDateKey ? h : best), null);
+
+      branchRows.push({
+        branch: b,
+        machineCount: meta.tracks.length,
+        heads,
+        peakHead,
+        peakVal: peakHead.curVal,
+        peakRemaining: peakHead.remaining,
+        peakPct: peakHead.usedPct,
+        peakEstDaysLeft: peakHead.estDaysLeft,
+        latestDayTotal,
+        monthTotal: monthTotalsByBranch.get(b) || 0,
+        minStale,
+        maxStale,
+        anyFallback,
+        latestThaiDate: latestDateOverall ? latestDateOverall.latestThaiDate : '-'
+      });
+    }
+
+    // Sort according to selected metric
+    const metric = state.rankingMetric;
+    if (metric === 'latest_counter') {
+      branchRows.sort((a, b) => b.peakVal - a.peakVal);
+      headRows.sort((a, b) => b.curVal - a.curVal);
+    } else if (metric === 'latest_day_used') {
+      branchRows.sort((a, b) => b.latestDayTotal - a.latestDayTotal);
+      headRows.sort((a, b) => b.latestDayShots - a.latestDayShots);
+    } else {
+      branchRows.sort((a, b) => b.monthTotal - a.monthTotal);
+      headRows.sort((a, b) => b.monthShots - a.monthShots);
+    }
+
+    return { asOf, branchRows, headRows };
+  }
+
+  function renderRanking() {
+    if (!state.processed) return;
+    const { asOf, branchRows, headRows } = computeRankingData();
+    const isBranchView = state.rankingView === 'branch';
+    const items = isBranchView ? branchRows : headRows;
+    state.lastRankingRows = { asOf, isBranchView, items };
+
+    const asOfThai = window.ShotEngine.formatThaiDateShort(asOf);
+    const fallbackCount = isBranchView
+      ? branchRows.filter(r => r.anyFallback).length
+      : headRows.filter(h => h.staleDays > 0).length;
+
+    const summaryBadge = document.getElementById('rankingFallbackSummary');
+    if (summaryBadge) {
+      summaryBadge.className = fallbackCount > 0 ? 'badge badge-amber' : 'badge badge-emerald';
+      summaryBadge.textContent = fallbackCount > 0
+        ? `ณ ${asOfThai}: ขาดส่ง ${fallbackCount} ${isBranchView ? 'สาขา' : 'หัว'} (ดึงวันล่าสุดมาจัดอันดับแทน)`
+        : `ณ ${asOfThai}: ส่งครบทุก${isBranchView ? 'สาขา' : 'หัว'} 100%`;
+    }
+
+    renderRankingPodium(items, isBranchView, asOfThai);
+    renderRankingChart(items, isBranchView, asOfThai);
+    renderRankingTable(items, isBranchView, asOfThai);
+  }
+
+  function getMetricDisplay(item, isBranchView) {
+    const m = state.rankingMetric;
+    if (isBranchView) {
+      if (m === 'latest_counter') return { val: item.peakVal, unit: 'ช็อตสะสม (หัวสูงสุด)', sub: `คงเหลือ ${fmtInt(item.peakRemaining)} (${item.peakPct.toFixed(1)}%)` };
+      if (m === 'latest_day_used') return { val: item.latestDayTotal, unit: 'ช็อต (วันล่าสุด)', sub: `อัปเดตล่าสุด ${item.latestThaiDate}` };
+      return { val: item.monthTotal, unit: 'ช็อต (รวมทั้งเดือน)', sub: window.ShotEngine.formatMonthLabel(state.selectedMonth) };
+    } else {
+      if (m === 'latest_counter') return { val: item.curVal, unit: 'ช็อตสะสม', sub: `คงเหลือ ${fmtInt(item.remaining)} (${item.usedPct.toFixed(1)}%)` };
+      if (m === 'latest_day_used') return { val: item.latestDayShots, unit: 'ช็อต (วันล่าสุด)', sub: `อัปเดตล่าสุด ${item.latestThaiDate}` };
+      return { val: item.monthShots, unit: 'ช็อต (รวมทั้งเดือน)', sub: window.ShotEngine.formatMonthLabel(state.selectedMonth) };
+    }
+  }
+
+  function renderRankingPodium(items, isBranchView, asOfThai) {
+    const el = document.getElementById('rankingPodium');
+    if (!el) return;
+    const medals = ['🥇 อันดับ 1', '🥈 อันดับ 2', '🥉 อันดับ 3'];
+    const top3 = items.slice(0, 3);
+
+    if (!top3.length) {
+      el.innerHTML = '';
+      return;
+    }
+
+    el.innerHTML = top3.map((item, idx) => {
+      const disp = getMetricDisplay(item, isBranchView);
+      const name = isBranchView ? item.branch : item.displayLabel;
+      const stale = isBranchView ? item.maxStale : item.staleDays;
+      const dateStr = isBranchView ? item.peakHead.latestThaiDate : item.latestThaiDate;
+      const estDays = isBranchView ? item.peakEstDaysLeft : item.estDaysLeft;
+
+      const statusPill = stale > 0
+        ? `<span class="badge badge-amber">ใช้วันล่าสุด ${escapeHtml(dateStr)} (ย้อนหลัง ${stale} วัน)</span>`
+        : `<span class="badge badge-emerald">ส่งแล้ว (${escapeHtml(asOfThai)})</span>`;
+
+      const estPill = state.rankingMetric === 'latest_counter' && estDays !== null
+        ? `<span class="badge ${estDays <= 14 ? 'badge-rose' : 'badge-blue'}">คาดว่าอีก ~${estDays} วันครบ 10M</span>`
+        : '';
+
+      return `
+        <article class="podium-card rank-${idx + 1}">
+          <div class="podium-top">
+            <span class="podium-medal">${medals[idx]}</span>
+            ${statusPill}
+          </div>
+          <div class="podium-name">${escapeHtml(name)}</div>
+          <div class="podium-metric num">${fmtInt(disp.val)} <span style="font-size:13px;font-weight:500;color:var(--text-muted);">${escapeHtml(disp.unit)}</span></div>
+          <div class="podium-meta">
+            <span>${escapeHtml(disp.sub)}</span>
+            ${estPill}
+          </div>
+        </article>`;
+    }).join('');
+  }
+
+  function renderRankingChart(items, isBranchView, asOfThai) {
+    destroyChart('ranking');
+    const ctx = document.getElementById('rankingBarChart');
+    const container = document.getElementById('rankingChartContainer');
+    const titleEl = document.getElementById('rankingChartTitle');
+    if (!ctx || typeof Chart === 'undefined') return;
+
+    // Adjust chart height cleanly for 18 branches vs 27 heads
+    if (container) {
+      container.style.height = Math.max(400, items.length * 26 + 70) + 'px';
+    }
+
+    const metricTitleMap = {
+      latest_counter: 'จัดอันดับช็อตสะสมหัวล่าสุด (ใกล้ครบ 10 ล้านช็อตที่สุด)',
+      latest_day_used: 'จัดอันดับช็อตที่ใช้ไปวันล่าสุด (Fallback วันล่าสุดที่มี)',
+      month_used: `จัดอันดับยอดใช้ช็อตรวม (${window.ShotEngine.formatMonthLabel(state.selectedMonth)})`
+    };
+    titleEl.textContent = `${metricTitleMap[state.rankingMetric]} — ${isBranchView ? 'รายสาขา' : 'รายหัวทั้งหมด'} (ณ ${asOfThai})`;
+
+    const labels = items.map((item, idx) => {
+      const baseName = isBranchView ? item.branch : item.displayLabel;
+      const stale = isBranchView ? item.maxStale : item.staleDays;
+      return `#${idx + 1} ${baseName}${stale > 0 ? ' *' : ''}`;
+    });
+
+    const values = items.map(item => getMetricDisplay(item, isBranchView).val);
+    const colors = items.map(item => {
+      if (state.rankingMetric === 'latest_counter') {
+        const v = isBranchView ? item.peakVal : item.curVal;
+        if (v >= 9000000) return '#dc2626';
+        if (v >= 8000000) return '#d97706';
+        return '#1d4ed8';
+      }
+      const stale = isBranchView ? item.maxStale : item.staleDays;
+      return stale > 0 ? '#f59e0b' : '#1d4ed8';
+    });
+
+    state.charts.ranking = new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels,
+        datasets: [{
+          label: metricTitleMap[state.rankingMetric],
+          data: values,
+          backgroundColor: colors,
+          borderRadius: 5
+        }]
+      },
+      options: {
+        indexAxis: 'y',
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+          x: {
+            beginAtZero: true,
+            max: state.rankingMetric === 'latest_counter' ? 10000000 : undefined,
+            ticks: { callback: v => fmtInt(v) }
+          },
+          y: { grid: { display: false } }
+        },
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label: c => {
+                const item = items[c.dataIndex];
+                const d = getMetricDisplay(item, isBranchView);
+                const dateStr = isBranchView ? item.peakHead.latestThaiDate : item.latestThaiDate;
+                return `${fmtInt(c.parsed.x)} ช็อต • ${d.sub} (ล่าสุด: ${dateStr})`;
+              }
+            }
+          }
+        }
+      }
+    });
+  }
+
+  function renderRankingTable(items, isBranchView, asOfThai) {
+    const table = document.getElementById('rankingTable');
+    const titleEl = document.getElementById('rankingTableTitle');
+    if (!table) return;
+    const thead = table.querySelector('thead');
+    const tbody = table.querySelector('tbody');
+
+    titleEl.textContent = isBranchView
+      ? `ตารางจัดอันดับรายสาขา (${items.length} สาขา) — อ้างอิง ณ ${asOfThai}`
+      : `ตารางจัดอันดับรายหัวทั้งหมด (${items.length} หัว) — อ้างอิง ณ ${asOfThai}`;
+
+    if (isBranchView) {
+      thead.innerHTML = `
+        <tr>
+          <th style="width:68px;">อันดับ</th>
+          <th>สาขา</th>
+          <th class="right">หัว 1 (มิเตอร์ล่าสุด / วันที่)</th>
+          <th class="right">หัว 2 (มิเตอร์ล่าสุด / วันที่)</th>
+          <th class="right">หัวสูงสุด (% / คงเหลือ)</th>
+          <th class="right">คาดว่าเหลือ (วัน)</th>
+          <th class="right">ใช้ไปวันล่าสุด</th>
+          <th class="right">รวมทั้งเดือน</th>
+          <th>สถานะการส่ง ณ ${escapeHtml(asOfThai)}</th>
+        </tr>`;
+
+      const formatHeadCell = (h) => {
+        if (!h) return `<span style="color:#cbd5e1;">-</span>`;
+        const staleTag = h.staleDays > 0
+          ? `<span style="color:var(--amber);font-weight:600;">${escapeHtml(h.latestThaiDate)} (-${h.staleDays} วัน)</span>`
+          : `<span>${escapeHtml(h.latestThaiDate)}</span>`;
+        return `<div class="head-pill"><strong class="num">${fmtInt(h.curVal)}</strong><span class="head-pill-sub">${staleTag}</span></div>`;
+      };
+
+      tbody.innerHTML = items.map((item, idx) => {
+        const rank = idx + 1;
+        const rCls = rank === 1 ? 'r1' : (rank === 2 ? 'r2' : (rank === 3 ? 'r3' : ''));
+        const h1 = item.heads[0] || null;
+        const h2 = item.heads[1] || null;
+
+        const barCls = item.peakVal >= 9000000 ? 'danger' : (item.peakVal >= 8000000 ? 'warn' : '');
+        const estText = item.peakEstDaysLeft !== null
+          ? `<span class="badge ${item.peakEstDaysLeft <= 14 ? 'badge-rose' : (item.peakEstDaysLeft <= 30 ? 'badge-amber' : 'badge-slate')}">~${item.peakEstDaysLeft} วัน</span>`
+          : '-';
+
+        const statusHtml = item.anyFallback
+          ? `<span class="badge badge-amber">ใช้วันล่าสุดแทน (${escapeHtml(item.latestThaiDate)} • ย้อนหลัง ${item.maxStale} วัน)</span>`
+          : `<span class="badge badge-emerald">✓ ส่งครบตรงวัน</span>`;
+
+        return `
+          <tr>
+            <td><span class="rank-badge ${rCls}">#${rank}</span></td>
+            <td><strong>${escapeHtml(item.branch)}</strong> <span style="font-size:11.5px;color:var(--text-muted);">(${item.machineCount} หัว)</span></td>
+            <td class="right">${formatHeadCell(h1)}</td>
+            <td class="right">${formatHeadCell(h2)}</td>
+            <td class="right">
+              <div class="head-pill" style="align-items:flex-end;">
+                <span class="num"><strong>${item.peakPct.toFixed(1)}%</strong> <span style="color:var(--text-muted);">(เหลือ ${fmtInt(item.peakRemaining)})</span></span>
+                <div class="mini-bar-wrap"><div class="progress-track" style="margin:2px 0 0;"><div class="progress-fill ${barCls}" style="width:${item.peakPct.toFixed(1)}%;"></div></div></div>
+              </div>
+            </td>
+            <td class="right">${estText}</td>
+            <td class="right num"><strong>${fmtInt(item.latestDayTotal)}</strong></td>
+            <td class="right num">${fmtInt(item.monthTotal)}</td>
+            <td>${statusHtml}</td>
+          </tr>`;
+      }).join('');
+    } else {
+      thead.innerHTML = `
+        <tr>
+          <th style="width:68px;">อันดับ</th>
+          <th>สาขา</th>
+          <th>หัว / หมายเลขเครื่อง</th>
+          <th class="right">มิเตอร์สะสมล่าสุด</th>
+          <th class="right">คงเหลือ (จาก 10M)</th>
+          <th class="right">อายุหัว (%)</th>
+          <th class="right">เฉลี่ย/วัน</th>
+          <th class="right">คาดว่าเหลือ (วัน)</th>
+          <th class="right">ใช้ไปวันล่าสุด</th>
+          <th>วันที่ส่งล่าสุด</th>
+        </tr>`;
+
+      tbody.innerHTML = items.map((h, idx) => {
+        const rank = idx + 1;
+        const rCls = rank === 1 ? 'r1' : (rank === 2 ? 'r2' : (rank === 3 ? 'r3' : ''));
+        const barCls = h.curVal >= 9000000 ? 'danger' : (h.curVal >= 8000000 ? 'warn' : '');
+        const estText = h.estDaysLeft !== null
+          ? `<span class="badge ${h.estDaysLeft <= 14 ? 'badge-rose' : (h.estDaysLeft <= 30 ? 'badge-amber' : 'badge-slate')}">~${h.estDaysLeft} วัน</span>`
+          : '-';
+        const dateBadge = h.staleDays > 0
+          ? `<span class="badge badge-amber">${escapeHtml(h.latestThaiDate)} (ย้อนหลัง ${h.staleDays} วัน)</span>`
+          : `<span class="badge badge-emerald">${escapeHtml(h.latestThaiDate)} (ตรงวัน)</span>`;
+
+        return `
+          <tr>
+            <td><span class="rank-badge ${rCls}">#${rank}</span></td>
+            <td><strong>${escapeHtml(h.branch)}</strong></td>
+            <td>หัว ${h.headNum} <span style="font-size:12px;color:var(--text-muted);">(${escapeHtml(h.headLabel)})</span></td>
+            <td class="right num"><strong>${fmtInt(h.curVal)}</strong></td>
+            <td class="right num">${fmtInt(h.remaining)}</td>
+            <td class="right">
+              <span class="num">${h.usedPct.toFixed(1)}%</span>
+              <div class="mini-bar-wrap" style="margin-left:6px;"><div class="progress-track" style="margin:0;"><div class="progress-fill ${barCls}" style="width:${h.usedPct.toFixed(1)}%;"></div></div></div>
+            </td>
+            <td class="right num">${h.avgPerDay > 0 ? fmtInt(h.avgPerDay) : '-'}</td>
+            <td class="right">${estText}</td>
+            <td class="right num">${fmtInt(h.latestDayShots)}</td>
+            <td>${dateBadge}</td>
+          </tr>`;
+      }).join('');
+    }
+  }
+
+  function exportRankingCsv() {
+    if (!state.lastRankingRows || !state.lastRankingRows.items) return;
+    const { asOf, isBranchView, items } = state.lastRankingRows;
+    const rows = [];
+
+    if (isBranchView) {
+      rows.push(['อันดับ', 'สาขา', 'จำนวนหัว', 'หัว1_มิเตอร์ล่าสุด', 'หัว1_วันที่ล่าสุด', 'หัว2_มิเตอร์ล่าสุด', 'หัว2_วันที่ล่าสุด', 'หัวสูงสุด_ช็อตสะสม', 'หัวสูงสุด_คงเหลือ', 'อายุหัว(%)', 'คาดว่าอีกกี่วันครบ10M', 'ใช้ไปวันล่าสุด', 'รวมทั้งเดือน', 'สถานะอ้างอิง']);
+      items.forEach((item, idx) => {
+        const h1 = item.heads[0];
+        const h2 = item.heads[1];
+        rows.push([
+          idx + 1,
+          item.branch,
+          item.machineCount,
+          h1 ? h1.curVal : '',
+          h1 ? h1.latestThaiDate : '',
+          h2 ? h2.curVal : '',
+          h2 ? h2.latestThaiDate : '',
+          item.peakVal,
+          item.peakRemaining,
+          item.peakPct.toFixed(1),
+          item.peakEstDaysLeft !== null ? item.peakEstDaysLeft : '',
+          item.latestDayTotal,
+          item.monthTotal,
+          item.anyFallback ? `ใช้วันล่าสุด ${item.latestThaiDate} (ย้อนหลัง ${item.maxStale} วัน)` : 'ส่งครบตรงวัน'
+        ]);
+      });
+    } else {
+      rows.push(['อันดับ', 'สาขา', 'หัวที่', 'หมายเลขเครื่อง', 'มิเตอร์สะสมล่าสุด', 'คงเหลือ(จาก10M)', 'อายุหัว(%)', 'เฉลี่ย/วัน', 'คาดว่าอีกกี่วันครบ10M', 'ใช้ไปวันล่าสุด', 'วันที่ส่งล่าสุด', 'ย้อนหลัง(วัน)']);
+      items.forEach((h, idx) => {
+        rows.push([
+          idx + 1,
+          h.branch,
+          h.headNum,
+          h.headLabel,
+          h.curVal,
+          h.remaining,
+          h.usedPct.toFixed(1),
+          h.avgPerDay > 0 ? Math.round(h.avgPerDay) : '',
+          h.estDaysLeft !== null ? h.estDaysLeft : '',
+          h.latestDayShots,
+          h.latestThaiDate,
+          h.staleDays
+        ]);
+      });
+    }
+
+    downloadCsv(`applicator_ranking_${isBranchView ? 'by_branch' : 'by_head'}_${asOf || 'latest'}.csv`, rows);
   }
 
   // ---------- KPI Cards ----------
@@ -1159,6 +1624,8 @@
     if (tabId === 'tab-overview' && state.processed) {
       // Ensure Chart.js resizes cleanly when tab becomes visible
       setTimeout(() => renderCharts(getActiveEvents()), 30);
+    } else if (tabId === 'tab-ranking' && state.processed) {
+      setTimeout(() => renderRanking(), 30);
     }
   }
 
@@ -1185,9 +1652,30 @@
       renderHeadCompareTable();
     });
 
-    document.querySelectorAll('.segmented button').forEach(btn => {
+    document.getElementById('rankingMetricSelect').addEventListener('change', e => {
+      state.rankingMetric = e.target.value;
+      renderRanking();
+    });
+
+    document.getElementById('rankingAsOfDate').addEventListener('change', e => {
+      state.rankingAsOfDate = e.target.value;
+      renderRanking();
+    });
+
+    document.querySelectorAll('[data-rank-view]').forEach(btn => {
       btn.addEventListener('click', () => {
-        document.querySelectorAll('.segmented button').forEach(b => b.classList.remove('active'));
+        document.querySelectorAll('[data-rank-view]').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        state.rankingView = btn.dataset.rankView;
+        renderRanking();
+      });
+    });
+
+    document.getElementById('btnExportRanking').addEventListener('click', exportRankingCsv);
+
+    document.querySelectorAll('[data-mode]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('[data-mode]').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
         state.gapMode = btn.dataset.mode;
         renderAll();

@@ -143,7 +143,10 @@
 
     <!-- Navigation Tabs -->
     <nav class="tabs-bar" role="tablist">
-      <button class="tab-btn active" role="tab" data-tab="tab-matrix" aria-selected="true">
+      <button class="tab-btn active" role="tab" data-tab="tab-ranking" aria-selected="true">
+        🏆 จัดอันดับ (Ranking)
+      </button>
+      <button class="tab-btn" role="tab" data-tab="tab-matrix" aria-selected="false">
         📋 ตารางสรุปบัญชี (สาขา × รายวัน)
       </button>
       <button class="tab-btn" role="tab" data-tab="tab-overview" aria-selected="false">
@@ -157,8 +160,81 @@
       </button>
     </nav>
 
-    <!-- TAB 1: Accounting Matrix (Primary view for Accounting!) -->
-    <section id="tab-matrix" class="tab-panel active">
+    <!-- TAB 0 (PRIMARY): Ranking — Latest Head & Branch Ranking with Automatic Fallback -->
+    <section id="tab-ranking" class="tab-panel active">
+      <div class="ranking-toolbar">
+        <div class="control-group" style="min-width: 245px;">
+          <label for="rankingMetricSelect">จัดอันดับตาม</label>
+          <select id="rankingMetricSelect">
+            <option value="latest_counter">🔥 ช็อตสะสมหัวล่าสุด (ใกล้ครบ 10M สุด)</option>
+            <option value="latest_day_used">⚡ ช็อตที่ใช้ไปวันล่าสุด (Fallback วันล่าสุดที่มี)</option>
+            <option value="month_used">📅 ยอดใช้ช็อตรวมประจำเดือน</option>
+          </select>
+        </div>
+
+        <div class="control-group" style="min-width: 195px;">
+          <label>มุมมองการจัดอันดับ</label>
+          <div class="segmented" role="group" aria-label="มุมมอง Ranking">
+            <button type="button" id="rankViewBranchBtn" class="active" data-rank-view="branch">รายสาขา</button>
+            <button type="button" id="rankViewHeadBtn" data-rank-view="head">รายหัวทั้งหมด</button>
+          </div>
+        </div>
+
+        <div class="control-group" style="min-width: 170px;">
+          <label for="rankingAsOfDate">อ้างอิง ณ วันที่</label>
+          <input id="rankingAsOfDate" type="date" />
+        </div>
+
+        <div class="control-spacer"></div>
+
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+          <span id="rankingFallbackSummary" class="badge badge-blue">-</span>
+          <button id="btnExportRanking" class="btn btn-outline" type="button">📥 ส่งออกตาราง Ranking (.csv)</button>
+        </div>
+      </div>
+
+      <!-- Top 3 Podium -->
+      <div id="rankingPodium" class="podium-grid"></div>
+
+      <!-- Ranking Bar Chart -->
+      <div class="card">
+        <div class="card-header">
+          <div>
+            <h2 id="rankingChartTitle" class="card-title">กราฟจัดอันดับรายสาขา (หัวล่าสุด)</h2>
+            <p id="rankingChartSubtitle" class="card-subtitle">หากวันที่อ้างอิงไม่มีการส่งเข้ามา ระบบจะใช้ยอดจากวันล่าสุดก่อนหน้านั้นของสาขามาจัดอันดับให้อัตโนมัติ</p>
+          </div>
+          <div class="matrix-legend">
+            <span><span class="legend-dot" style="background: var(--rose);"></span>≥ 9.0M (เร่งเปลี่ยนหัว)</span>
+            <span><span class="legend-dot" style="background: var(--amber);"></span>8.0M–8.99M (เตรียมสำรอง)</span>
+            <span><span class="legend-dot" style="background: var(--brand);"></span>&lt; 8.0M (ปกติ)</span>
+          </div>
+        </div>
+        <div class="card-body">
+          <div id="rankingChartContainer" class="chart-wrap-tall">
+            <canvas id="rankingBarChart"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <!-- Ranking Table -->
+      <div class="card">
+        <div class="card-header">
+          <div>
+            <h2 id="rankingTableTitle" class="card-title">ตารางจัดอันดับรายสาขา — ข้อมูลหัวที่ส่งเข้ามาล่าสุด</h2>
+            <p class="card-subtitle">แสดงวันที่ส่งจริงของแต่ละหัวชัดเจน หากวันนั้นไม่มียอดส่งเข้ามาจะขึ้นป้ายสีส้มระบุวันล่าสุดที่ใช้แทน</p>
+          </div>
+        </div>
+        <div class="table-scroll" style="max-height: 68vh;">
+          <table id="rankingTable" class="simple-table">
+            <thead></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 1: Accounting Matrix -->
+    <section id="tab-matrix" class="tab-panel">
       <div class="card">
         <div class="card-header">
           <div>
