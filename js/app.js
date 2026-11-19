@@ -179,6 +179,29 @@
     }
     state.selectedBranch = (prevBranch === 'ALL' || branches.includes(prevBranch)) ? prevBranch : 'ALL';
     branchSelect.value = state.selectedBranch;
+
+    // Populate Head 1 / Head 2 side-by-side branch comparison selector
+    const headSel = document.getElementById('headCompareBranchSelect');
+    if (headSel) {
+      const prevHeadBranch = headSel.value;
+      headSel.innerHTML = '';
+      for (const b of branches) {
+        const opt = document.createElement('option');
+        opt.value = b;
+        const mc = state.processed.branchMeta[b]?.machineCount || 1;
+        opt.textContent = `${b} (${mc} หัว)`;
+        headSel.appendChild(opt);
+      }
+      if (state.selectedBranch !== 'ALL' && branches.includes(state.selectedBranch)) {
+        headSel.value = state.selectedBranch;
+      } else if (prevHeadBranch && branches.includes(prevHeadBranch)) {
+        headSel.value = prevHeadBranch;
+      } else if (branches.includes('เชียงใหม่')) {
+        headSel.value = 'เชียงใหม่';
+      } else if (branches.length > 0) {
+        headSel.value = branches[0];
+      }
+    }
   }
 
   // ---------- Filtered View Computation ----------
@@ -223,6 +246,7 @@
 
     renderKPIs(events, audits);
     renderMatrix(events);
+    renderHeadCompareTable();
     renderBranchSummaryTable(events);
     renderCharts(events);
     renderMachines();
@@ -429,6 +453,96 @@
     }
     footHtml += `<td class="col-total num">${fmtInt(grandTotal)}</td></tr>`;
     tfoot.innerHTML = footHtml;
+  }
+
+  // ---------- Side-by-Side Head 1 / Head 2 Daily Meter Comparison Table ----------
+  function renderHeadCompareTable() {
+    const sel = document.getElementById('headCompareBranchSelect');
+    const table = document.getElementById('headCompareTable');
+    if (!sel || !table || !state.processed) return;
+
+    const branch = state.selectedBranch !== 'ALL' ? state.selectedBranch : sel.value;
+    if (sel.value !== branch && branch) sel.value = branch;
+    const meta = state.processed.branchMeta[branch];
+    const thead = table.querySelector('thead');
+    const tbody = table.querySelector('tbody');
+    const tfoot = table.querySelector('tfoot');
+
+    if (!meta) {
+      thead.innerHTML = '';
+      tbody.innerHTML = '';
+      tfoot.innerHTML = '';
+      return;
+    }
+
+    const tracks = meta.tracks; // 1 or 2 tracks
+    const rawEvents = state.processed.dailyEvents.filter(ev => {
+      if (ev.branch !== branch) return false;
+      if (state.selectedMonth !== 'ALL' && ev.monthKey !== state.selectedMonth) return false;
+      return true;
+    });
+
+    // Group by dateKey -> trackId -> event
+    const byDate = new Map();
+    for (const ev of rawEvents) {
+      if (!byDate.has(ev.dateKey)) byDate.set(ev.dateKey, { thaiDate: ev.thaiDate, byTrack: {} });
+      byDate.get(ev.dateKey).byTrack[ev.trackId] = ev;
+    }
+    const sortedDates = Array.from(byDate.keys()).sort();
+
+    // Header
+    let hHtml = `<tr><th>วันที่</th>`;
+    tracks.forEach((t, idx) => {
+      hHtml += `<th class="right">หัว ${idx + 1} (${escapeHtml(t.label)}) — มิเตอร์สะสม</th>`;
+      hHtml += `<th class="right">หัว ${idx + 1} — ใช้ไป</th>`;
+    });
+    hHtml += `<th class="right">รวมวันนั้น</th><th>หมายเหตุ</th></tr>`;
+    thead.innerHTML = hHtml;
+
+    const trackSums = tracks.map(() => 0);
+    let grandSum = 0;
+    let bHtml = '';
+
+    for (const dk of sortedDates) {
+      const row = byDate.get(dk);
+      let daySum = 0;
+      const notes = [];
+      let cells = `<td class="num"><strong>${escapeHtml(row.thaiDate)}</strong></td>`;
+
+      tracks.forEach((t, idx) => {
+        const ev = row.byTrack[t.id];
+        if (!ev) {
+          cells += `<td class="right" style="color:#cbd5e1;">-</td><td class="right" style="color:#cbd5e1;">-</td>`;
+        } else {
+          daySum += ev.shotsUsed;
+          trackSums[idx] += ev.shotsUsed;
+          cells += `<td class="right num">${fmtInt(ev.curVal)}</td>`;
+          cells += `<td class="right num" style="color:var(--brand);font-weight:600;">${ev.shotsUsed > 0 ? '+' + fmtInt(ev.shotsUsed) : '0'}</td>`;
+          if (ev.status === 'HEAD_SWAP_NEW') notes.push(`<span class="badge badge-blue">หัว ${idx + 1} เปลี่ยนหัวใหม่</span>`);
+          else if (ev.status === 'HEAD_SWAP_USED') notes.push(`<span class="badge badge-amber">หัว ${idx + 1} สลับหัวสำรอง</span>`);
+          else if (ev.status === 'MULTI_DAY') notes.push(`<span class="badge badge-amber">หัว ${idx + 1} สะสม ${ev.dayGap} วัน</span>`);
+          else if (ev.status === 'GAP_RESET') notes.push(`<span class="badge badge-amber">หัว ${idx + 1} ขาดส่ง ${ev.dayGap} วัน</span>`);
+        }
+      });
+
+      grandSum += daySum;
+      cells += `<td class="right num"><strong>${fmtInt(daySum)}</strong></td>`;
+      cells += `<td>${notes.length ? notes.join(' ') : '<span style="color:var(--emerald);font-size:12px;">✓ ปกติ</span>'}</td>`;
+      bHtml += `<tr>${cells}</tr>`;
+    }
+
+    if (!sortedDates.length) {
+      bHtml = `<tr><td colspan="${tracks.length * 2 + 3}" style="text-align:center;color:var(--text-muted);padding:20px;">ไม่พบข้อมูลในช่วงเวลาที่เลือก</td></tr>`;
+    }
+    tbody.innerHTML = bHtml;
+
+    // Footer totals
+    let fHtml = `<tr style="background:#f1f5f9;font-weight:700;"><td>รวม (${sortedDates.length} วัน)</td>`;
+    tracks.forEach((_, idx) => {
+      fHtml += `<td class="right">-</td><td class="right num" style="color:var(--brand);">${fmtInt(trackSums[idx])}</td>`;
+    });
+    fHtml += `<td class="right num" style="color:var(--brand);">${fmtInt(grandSum)}</td><td></td></tr>`;
+    tfoot.innerHTML = fHtml;
   }
 
   // ---------- Branch Summary Ranking Table ----------
@@ -1065,6 +1179,10 @@
     document.getElementById('branchSelect').addEventListener('change', e => {
       state.selectedBranch = e.target.value;
       renderAll();
+    });
+
+    document.getElementById('headCompareBranchSelect').addEventListener('change', () => {
+      renderHeadCompareTable();
     });
 
     document.querySelectorAll('.segmented button').forEach(btn => {

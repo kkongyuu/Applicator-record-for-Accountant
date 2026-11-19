@@ -355,8 +355,10 @@
         // the primary counter aligns cleanly with Sheet2!
         const candidates = clusters.map(cl => cl.rep).sort((a, b) => a.val - b.val);
 
-        // Step A: Match candidates to existing active tracks (within maxGapDays & reasonable delta)
-        const pairs = [];
+        // Step A: EXACT Optimal 1-to-1 matching between active tracks (<= 2) and today's candidates.
+        // Maximizes number of matched heads first (never drops a head due to greedy order or send order),
+        // then minimizes combined cost (matching machine ID tag + realistic daily shot delta).
+        const validEdges = [];
         for (let tIdx = 0; tIdx < tracks.length; tIdx++) {
           const track = tracks[tIdx];
           const dayGap = daysBetween(track.lastDateInfo.utcMs, dateInfo.utcMs);
@@ -368,20 +370,46 @@
               const perDay = delta / dayGap;
               let tagBonus = 0;
               if (track.canonicalTag && cand.machineTag) {
-                tagBonus = track.canonicalTag === cand.machineTag ? -100000 : 80000;
+                tagBonus = track.canonicalTag === cand.machineTag ? -120000 : 120000;
               }
               const score = Math.abs(perDay - 55000) + tagBonus;
-              pairs.push({ tIdx, cIdx, delta, dayGap, score });
+              validEdges.push({ tIdx, cIdx, delta, dayGap, score });
             }
           }
         }
 
-        pairs.sort((a, b) => a.score - b.score);
+        // Exact optimal matching for <= 2 tracks (exhaustive over all 1-pair and 2-pair combinations)
+        let bestAssignment = [];
+        let bestScore = Infinity;
+
+        // Consider single-edge assignments
+        for (const e of validEdges) {
+          if (bestAssignment.length < 1 || (bestAssignment.length === 1 && e.score < bestScore)) {
+            bestAssignment = [e];
+            bestScore = e.score;
+          }
+        }
+        // Consider two-edge disjoint assignments (strictly preferred over 1-edge whenever valid!)
+        if (tracks.length === 2 && validEdges.length >= 2) {
+          for (let i = 0; i < validEdges.length; i++) {
+            for (let j = i + 1; j < validEdges.length; j++) {
+              const a = validEdges[i];
+              const b = validEdges[j];
+              if (a.tIdx !== b.tIdx && a.cIdx !== b.cIdx) {
+                const comboScore = a.score + b.score;
+                if (bestAssignment.length < 2 || comboScore < bestScore) {
+                  bestAssignment = [a, b];
+                  bestScore = comboScore;
+                }
+              }
+            }
+          }
+        }
+
         const matchedTracks = new Set();
         const matchedCands = new Set();
 
-        for (const p of pairs) {
-          if (matchedTracks.has(p.tIdx) || matchedCands.has(p.cIdx)) continue;
+        for (const p of bestAssignment) {
           matchedTracks.add(p.tIdx);
           matchedCands.add(p.cIdx);
 

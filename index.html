@@ -180,6 +180,27 @@
         </div>
       </div>
 
+      <!-- Side-by-Side Head 1 / Head 2 Daily Meter Table (Zero Column Jumping!) -->
+      <div class="card">
+        <div class="card-header">
+          <div>
+            <h2 class="card-title">ตารางมิเตอร์แยกหัวรายวัน (หัว 1 / หัว 2 — จับคู่ตรงหัวอัตโนมัติไม่กระโดดข้ามช่อง)</h2>
+            <p class="card-subtitle">เปรียบเทียบเลขมิเตอร์แต่ละหัวรายวัน แก้ปัญหาส่งก่อน-ส่งหลัง หรือ OCR ขึ้น 0/ESC แล้วเลขสลับคอลัมน์ใน Sheet2</p>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <label for="headCompareBranchSelect" style="font-size:13px;font-weight:600;color:var(--text-secondary);">เลือกสาขา:</label>
+            <select id="headCompareBranchSelect" style="height:36px;padding:0 12px;border-radius:8px;border:1px solid var(--border-strong);font-family:inherit;font-size:13.5px;"></select>
+          </div>
+        </div>
+        <div class="table-scroll" style="max-height: 480px;">
+          <table id="headCompareTable" class="simple-table">
+            <thead></thead>
+            <tbody></tbody>
+            <tfoot></tfoot>
+          </table>
+        </div>
+      </div>
+
       <!-- Quick Branch Summary Table below matrix -->
       <div class="card">
         <div class="card-header">
